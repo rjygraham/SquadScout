@@ -5,3 +5,12 @@
 .squad/sessions/
 # Squad: SubSquad activation file (local to this machine)
 .squad-workstream
+
+# .NET build outputs
+**/bin/
+**/obj/
+TestResults/
+.vs/
+
+# Azure Functions local configuration
+local.settings.json

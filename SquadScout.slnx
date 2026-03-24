@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SquadScout.App/SquadScout.App.csproj" />
+    <Project Path="src/SquadScout.Broker/SquadScout.Broker.csproj" />
+    <Project Path="src/SquadScout.Contracts/SquadScout.Contracts.csproj" />
+    <Project Path="src/SquadScout.Functions/SquadScout.Functions.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SquadScout.Broker.Tests/SquadScout.Broker.Tests.csproj" />
+  </Folder>
+</Solution>

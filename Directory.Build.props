@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <Authors>Squad</Authors>
+    <Deterministic>true</Deterministic>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>preview</LangVersion>
+    <Nullable>enable</Nullable>
+    <RepositoryUrl>https://github.com/rjygraham/SquadScout</RepositoryUrl>
+  </PropertyGroup>
+</Project>
