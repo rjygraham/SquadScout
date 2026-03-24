@@ -131,6 +131,33 @@ public sealed class InMemorySessionOrchestratorReplayTests
         Assert.Contains("session id", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task ReplayRejectsCrossProjectEnvelopeTargets()
+    {
+        var orchestrator = new InMemorySessionOrchestrator(new NullRelayPublisher(), new SessionSequenceValidator());
+        var session = await StartSessionAsync(orchestrator);
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => orchestrator.ReplayAsync(
+            session.SessionId,
+            new MessageEnvelope<ReplayRequestPayload>
+            {
+                ProjectId = "other-project",
+                SessionId = session.SessionId,
+                Generation = SessionEnvelopeContract.InitialGeneration,
+                MessageType = SessionMessageType.ReplayRequest,
+                Direction = MessageDirection.ClientToBroker,
+                ClientSequence = 1,
+                MessageId = "client-replay-project-mismatch",
+                CorrelationId = "corr-project-mismatch",
+                Payload = new ReplayRequestPayload
+                {
+                    FromSequenceInclusive = 1
+                }
+            }));
+
+        Assert.Contains("project id", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static async Task<SessionDescriptor> StartSessionAsync(InMemorySessionOrchestrator orchestrator) =>
         await orchestrator.StartAsync(new StartSessionCommand
         {

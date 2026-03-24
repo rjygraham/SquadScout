@@ -87,6 +87,22 @@ public sealed class SessionSequenceValidatorTests
         Assert.Equal(5, result.ExpectedClientSequence);
     }
 
+    [Fact]
+    public void SurfacesFutureGenerationWithoutMutatingAcknowledgementState()
+    {
+        var result = _validator.Validate(
+            new SessionSequencingSnapshot(
+                Generation: 3,
+                LastBrokerSequence: 9,
+                LastClientSequence: 4,
+                AcknowledgedSequence: 9),
+            CreateClientHeartbeat(clientSequence: 5, acknowledgedSequence: 9, generation: 4));
+
+        Assert.Equal(SequenceValidationStatus.FutureGeneration, result.Status);
+        Assert.Equal(9, result.AppliedAcknowledgedSequence);
+        Assert.Equal(5, result.ExpectedClientSequence);
+    }
+
     private static MessageEnvelope<HeartbeatPayload> CreateClientHeartbeat(
         long clientSequence,
         long acknowledgedSequence,

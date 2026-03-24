@@ -50,6 +50,12 @@
 - **Wire shape tightened:** `src\SquadScout.Contracts\Messages\SessionMessageSerializer.cs` now omits null optional members so control frames do not emit ambiguous empty sequencing fields.
 - **Contract proof path:** `tests\SquadScout.Broker.Tests\MessageEnvelopeContractTests.cs` now covers broker-owned sequencing, client-owned sequencing, and generation mismatch handling for reconnect/replay safety.
 
+### Issue #3 Revision — Missing Failure-Mode Coverage (2026-03-25)
+
+- **Coverage pattern reinforced:** Future-generation drift and trust-boundary mismatch need their own tests even when adjacent stale-generation and session-id paths already pass; they protect different broker failure modes.
+- **Replay rejection seam stays explicit:** `src\SquadScout.Broker\Sessions\InMemorySessionOrchestrator.cs` rejects replay envelopes whose `ProjectId` or `SessionId` do not match the targeted runtime session before replay/validation logic runs.
+- **Focused validation files:** The regression proof points for this work are `tests\SquadScout.Broker.Tests\SessionSequenceValidatorTests.cs` and `tests\SquadScout.Broker.Tests\InMemorySessionOrchestratorReplayTests.cs`.
+
 ### Issue #3 Revision Assignment (2026-03-24T19:30:09Z)
 
 - **Previous owner:** Morpheus (Issue #3 implementation, commit `8068e81`)
