@@ -84,4 +84,21 @@
 
 **Impact:** Blocks Phase 2 grain activation and replay buffer. Message envelope is critical path; decision gate remains locked until both blockers resolved.
 
+### Issue #3 Acceptance Bar (2026-03-25)
+
+- **Reliability core paths:** Issue #3 lives primarily in `src\SquadScout.Broker\Sessions\` (`SessionSequenceValidator`, `CircularReplayBuffer`, `SessionRuntimeState`, `InMemorySessionOrchestrator`) with focused coverage in `tests\SquadScout.Broker.Tests\`.
+- **Tester review pattern:** Reviewer signoff must treat client-sequence monotonicity, cumulative ack semantics, and broker replay-window behavior as three separate invariants. Green happy-path tests are not enough unless duplicate, gap, overflow, and generation-boundary behavior are explicit.
+- **Current strong coverage:** Branch already exercises first-sequence acceptance, new-message ack regression rejection, overflow gap reporting, reset-boundary replay, heartbeat exclusion from replay, and session-id trust-boundary checks.
+- **Remaining high-risk coverage to demand:** Duplicate frames with changed ack, gap frames with ack interaction, future-generation validation, project-id mismatch, invalid replay request bounds (`FromSequenceInclusive`, `MaximumMessages`), and deterministic multi-page replay continuation.
+- **Verified commands for this review bar:** `dotnet build .\SquadScout.slnx -nologo`, focused broker test filter for `SessionSequenceValidatorTests|CircularReplayBufferTests|InMemorySessionOrchestratorReplayTests`, then `dotnet test .\SquadScout.slnx -nologo --no-build`.
+
+### Morpheus Issue #3 Delivery (2026-03-24)
+
+- **Branch:** `squad/3-sequence-validator-replay-buffer` (commit `8068e81`)
+- **Scope:** In-memory reliability core: monotonic client validation, 500-message replay buffer, overflow/gap reporting, generation reset boundaries, trust-boundary checks
+- **Implementation:** Broker session state + replay orchestrator with focused test suite
+- **Decision gates merged:** Replay buffer scope, overflow behavior, generation reset boundary, trust-boundary enforcement all documented in `.squad/decisions.md`
+- **Next:** Incorporate Switch's remaining high-risk coverage before signoff; merge to unblock Phase 2 grain implementation
+
+
 

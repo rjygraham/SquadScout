@@ -64,10 +64,19 @@
 - Decision note merged into `.squad/decisions.md` under "Message Envelope Contract Implementation — 2026-03-25"
 - Team history updated with cross-agent learnings
 
-### Issue #3 Sequence Validator & Replay Buffer (2026-03-25)
+### Issue #3 Sequence Validator & Replay Buffer (2026-03-24)
 
 - `src\SquadScout.Broker\Sessions\` now holds the in-memory reliability core: `SessionSequenceValidator`, `CircularReplayBuffer`, `SessionRuntimeState`, and `InMemorySessionOrchestrator` coordinate broker-owned sequencing, cumulative ack tracking, and generation resets.
 - Replayable broker frames are limited to sequenced `Output` and `SessionLifecycle` messages; heartbeat and replay-control envelopes stay outside the circular buffer so liveness chatter cannot evict transcript data.
 - Replay overflow behavior is explicit: responses always publish `availableFromSequence` / `availableToSequence`, set `gapDetected` when the requested cursor falls behind the buffer head, and paginate deterministically via `maximumMessages`.
 - Ordered-state resets are generation-scoped: `ResetGenerationAsync` clears broker sequence, client sequence, ack state, and replay buffer; stale-generation replay requests return a reset boundary (current generation + available window) instead of cross-generation data.
 - Trust-boundary guard added: broker replay/validation paths now reject envelopes whose `{ projectId, sessionId }` do not match the targeted session state.
+
+### Switch Acceptance Bar — Issue #3 (2026-03-25)
+
+- **Acceptance checklist:** 5 core areas (client monotonic, ack semantics, buffer determinism, replay/reconnect safety, input validation)
+- **Verification commands:** Standardized test filters for validator, buffer, and orchestrator tests
+- **High-risk modes identified:** Ack duplication, gap interaction, bounds handling, generation drift, pagination, trust boundary (project-id)
+- **Current coverage:** 6 areas strong, 7 areas needed before signoff (dup-ack, gap-ack, future-gen, project-id, invalid bounds, oversized batch, multi-page)
+- **Pattern worth preserving:** Replay buffer scope (broker-transcript only), explicit overflow window, generation reset boundary, trust checks
+
