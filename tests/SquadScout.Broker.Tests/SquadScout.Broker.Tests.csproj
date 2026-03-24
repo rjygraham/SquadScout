@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\SquadScout.Broker\SquadScout.Broker.csproj" />
     <ProjectReference Include="..\..\src\SquadScout.Contracts\SquadScout.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\SquadScout.Functions\SquadScout.Functions.csproj" />
   </ItemGroup>
 
   <Target Name="CopyPtyNetNativeFiles" AfterTargets="Build" Condition="'$(PlatformTarget)' != '' and '$(PlatformTarget)' != 'AnyCPU'">
