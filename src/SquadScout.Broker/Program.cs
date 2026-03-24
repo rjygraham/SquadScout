@@ -11,6 +11,7 @@ builder.WebHost.UseUrls(brokerOptions.ListenUrl);
 builder.Services.Configure<BrokerHostOptions>(builder.Configuration.GetSection(BrokerHostOptions.SectionName));
 builder.Services.AddSingleton<IProjectCatalog, InMemoryProjectCatalog>();
 builder.Services.AddSingleton<IRelayPublisher, NullRelayPublisher>();
+builder.Services.AddSingleton<ISequenceValidator, SessionSequenceValidator>();
 builder.Services.AddSingleton<ISessionOrchestrator, InMemorySessionOrchestrator>();
 
 var app = builder.Build();

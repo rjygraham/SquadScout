@@ -63,3 +63,40 @@
 - **Recommendation:** Lock invariants before Issue #3 to prevent semantic divergence across broker, PubSub, and application layers
 - Decision note merged into `.squad/decisions.md` under "Message Envelope Contract Implementation — 2026-03-25"
 - Team history updated with cross-agent learnings
+
+### Issue #3 Sequence Validator & Replay Buffer (2026-03-24)
+
+- `src\SquadScout.Broker\Sessions\` now holds the in-memory reliability core: `SessionSequenceValidator`, `CircularReplayBuffer`, `SessionRuntimeState`, and `InMemorySessionOrchestrator` coordinate broker-owned sequencing, cumulative ack tracking, and generation resets.
+- Replayable broker frames are limited to sequenced `Output` and `SessionLifecycle` messages; heartbeat and replay-control envelopes stay outside the circular buffer so liveness chatter cannot evict transcript data.
+- Replay overflow behavior is explicit: responses always publish `availableFromSequence` / `availableToSequence`, set `gapDetected` when the requested cursor falls behind the buffer head, and paginate deterministically via `maximumMessages`.
+- Ordered-state resets are generation-scoped: `ResetGenerationAsync` clears broker sequence, client sequence, ack state, and replay buffer; stale-generation replay requests return a reset boundary (current generation + available window) instead of cross-generation data.
+- Trust-boundary guard added: broker replay/validation paths now reject envelopes whose `{ projectId, sessionId }` do not match the targeted session state.
+
+### Switch Acceptance Bar — Issue #3 (2026-03-25)
+
+- **Acceptance checklist:** 5 core areas (client monotonic, ack semantics, buffer determinism, replay/reconnect safety, input validation)
+- **Verification commands:** Standardized test filters for validator, buffer, and orchestrator tests
+- **High-risk modes identified:** Ack duplication, gap interaction, bounds handling, generation drift, pagination, trust boundary (project-id)
+- **Current coverage:** 6 areas strong, 7 areas needed before signoff (dup-ack, gap-ack, future-gen, project-id, invalid bounds, oversized batch, multi-page)
+- **Pattern worth preserving:** Replay buffer scope (broker-transcript only), explicit overflow window, generation reset boundary, trust checks
+
+### Issue #3 Formal Review Outcome (2026-03-24T19:30:09Z)
+
+**REJECTED by Switch.** Build passed, focused broker tests passed (12/12), full solution tests passed (20/20).
+
+**Strengths confirmed:**
+- Broker-owned monotonic sequencing with client-side validation
+- Cumulative ack high-water tracking (monotonic + idempotent)
+- 500-message circular replay model with explicit overflow/gap reporting
+- Generation reset boundaries with empty replay + metadata response
+- Heartbeat exclusion from replay storage
+- Session-id trust-boundary rejection
+
+**Blocking gaps (coverage-driven):**
+1. No focused test for `SequenceValidationStatus.FutureGeneration` path; ack state preservation unproven
+2. No separate trust-boundary test for project-id mismatch replay rejection (suite covers session-id only)
+
+**Revision owner:** Link (Morpheus locked out per team protocol for rejection correction cycle)
+
+**Impact:** Issue #3 remains unmerged; Phase 2 grain activation is blocked. No implementation bug found; coverage is the sole blocker. Morpheus is resting during Link's correction iteration.
+

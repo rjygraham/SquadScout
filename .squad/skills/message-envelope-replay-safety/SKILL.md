@@ -18,6 +18,8 @@ Use this skill when a broker and client exchange realtime session traffic over a
 - **Keep ack in one place:** Put the cumulative acknowledgement on the top-level envelope, not duplicated inside heartbeat payloads, so replay and reconnect code have one source of truth.
 - **Define the ordering identity explicitly:** If ordered state can reset without changing `sessionId`, add a generation/restart marker. Otherwise guarantee a fresh session id on any reset.
 - **Replay must advertise the available window:** Include available head/tail sequence values and an explicit gap/overflow signal so the client can recover safely instead of silently skipping lost data.
+- **Generation mismatch should be a reset boundary, not cross-generation replay:** If a client requests replay for an older generation, respond with the current generation and available window metadata, set `gapDetected = true`, and avoid mixing old-generation requests with new-generation messages.
+- **Review both generation mismatch directions:** Keep stale-generation and future-generation validation as separate failure modes, and test that neither path mutates the broker's cumulative acknowledgement state.
 - **Sequence beats timestamp:** Timestamps are for diagnostics, leases, and correlation. Ordering, dedupe, and replay should use sequence plus stable message identifiers.
 - **Version the envelope early:** Add contract versioning before multiple components ship against the first draft.
 
@@ -25,6 +27,7 @@ Use this skill when a broker and client exchange realtime session traffic over a
 
 - Replay request: `{ projectId, sessionId, afterSequence, expectedGeneration, correlationId }`
 - Replay response: `{ generation, availableFromSequence, availableToSequence, gapDetected, messages: [...] }`
+- Reset-boundary replay response: `{ generation: 5, availableFromSequence: 1, availableToSequence: 17, gapDetected: true, messages: [] }`
 - Heartbeat / ack control frame: `{ sessionId, ackUpToSequence, issuedAtUtc, expiresAtUtc, correlationId }`
 
 ## Anti-Patterns
@@ -34,3 +37,4 @@ Use this skill when a broker and client exchange realtime session traffic over a
 - Do not rely on transport message ids or timestamps for transcript ordering.
 - Do not allow overflow/gap behavior to be implied; surface it in the contract.
 - Do not reuse a session identity after ordered state resets unless the contract also carries generation metadata.
+- Do not replay new-generation messages in response to an old-generation cursor; force the client to recognize the reset boundary first.

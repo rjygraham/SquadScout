@@ -68,6 +68,50 @@
 - ~~Maximum concurrent sessions~~ → Low, single-user scope (directive accepted)
 - ~~Multi-user support~~ → Deferred; design for scalability (directive accepted)
 
+## Morpheus — Issue #3 Sequence Validator & Replay Buffer (2026-03-24)
+
+**Context:** In-memory sequence validator and circular replay buffer define app-level reliability before transport integration.
+
+**Decisions:**
+
+- **Replay buffer scope:** Only sequenced broker transcript frames (`Output` and `SessionLifecycle`) enter the circular replay buffer. Heartbeats and replay-control envelopes remain outside the buffer so control chatter cannot evict transcript state.
+- **Overflow behavior:** When a replay cursor falls behind the buffer head, the broker returns the overlapping available window, sets `gapDetected = true`, and publishes `availableFromSequence` / `availableToSequence` so the client can perform explicit recovery.
+- **Generation reset boundary:** A replay request for an older generation returns a reset-boundary response for the current generation with window metadata and no cross-generation messages. This forces the client to detect ordered-state reset before applying new transcript data.
+- **Trust-boundary enforcement:** Client envelopes must target the exact `{ projectId, sessionId }` bound to the session runtime state; mismatches are rejected before validation or replay logic mutates state.
+
+## Switch — Issue #3 Acceptance Bar (2026-03-25)
+
+**Owner:** Switch  
+**Branch under review:** `squad/3-sequence-validator-replay-buffer`  
+**Requested by:** Ryan Graham
+
+**Acceptance checklist items:**
+
+1. Client monotonic validation is explicit and tested (ClientSequence handling for first, contiguous, duplicate, gap, stale/future generation, non-positive values).
+2. Ack semantics are cumulative, generation-scoped, and reviewer-readable (cannot exceed broker's last replayable, non-regressing, duplicate/gap tested, generation reset cleans state).
+3. Circular replay buffer behavior is deterministic (500 default, only Output/SessionLifecycle, overflow eviction, boundary behavior tested).
+4. Replay and reconnect semantics are safe (GapDetected, AvailableFromSequence/To, HasMore/IsComplete, stale-generation reset boundary, cross-session/project rejection, multi-page deterministic).
+5. Input validation is covered (invalid replay bounds rejected/clamped, oversized batches explicit).
+
+**High-risk failure modes:**
+- Ack ambiguity on duplicate frames with changed ack
+- Ack behavior during detected gaps
+- Replay request bound handling
+- Generation drift (stale and future)
+- Window pagination after overflow
+- Trust-boundary mismatch (project-id)
+
+**Verification commands:**
+```powershell
+dotnet build .\SquadScout.slnx -nologo
+dotnet test .\tests\SquadScout.Broker.Tests\SquadScout.Broker.Tests.csproj -nologo --filter "FullyQualifiedName~SessionSequenceValidatorTests|FullyQualifiedName~CircularReplayBufferTests|FullyQualifiedName~InMemorySessionOrchestratorReplayTests"
+dotnet test .\SquadScout.slnx -nologo --no-build
+```
+
+**Current coverage (strong):** first client sequence, ack regression rejection, overflow gap signaling, reset-boundary replay, heartbeat exclusion, session-id mismatch rejection.
+
+**Remaining coverage needed:** duplicate-with-changed-ack, gap-with-ack, future-generation, project-id mismatch, invalid bounds, oversized batch, multi-page pagination.
+
 ## Ordered Implementation Backlog — 2026-03-25
 
 **From Neo's backlog synthesis (2026-03-25)**

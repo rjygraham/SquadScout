@@ -33,6 +33,10 @@ When a local broker hosts multiple PTY sessions for different projects and must 
 - MAUI client joins the group on session start; leaves on session end.
 - Prevents cross-session message leakage and simplifies isolation.
 
+**Trust-boundary failure coverage:**
+- Test wrong `sessionId` and wrong `projectId` separately for replay and validation paths.
+- These protect different isolation failures; proving one does not prove the other.
+
 **Timeout-based cleanup:**
 - If session has no activity (input or heartbeat response) for >5 minutes, auto-terminate (graceful kill) and emit `sessionTimeout` event.
 - Prevents zombie sessions after MAUI crashes.
