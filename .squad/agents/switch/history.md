@@ -59,4 +59,16 @@
 - **Single source of truth:** Sequence acknowledgements stay on `MessageEnvelope<TPayload>.AcknowledgedSequence`; heartbeat payloads carry only liveness metadata to avoid duplicate ack state.
 - **Contract coverage:** Representative wire-contract tests live in `tests\SquadScout.Broker.Tests\MessageEnvelopeContractTests.cs`, including serialization shape, replay snapshot shape, and optional-field deserialization for backward-compatible additions.
 
+### Issue #2 Contract Batch Parallel Execution (2026-03-25)
+
+**Switch outcome (implementation + test):**
+- Implemented `MessageEnvelope<TPayload>` generic shape with acknowledgement as single source of truth
+- Established shared JSON serialization (camelCase + string-enum) in `SessionMessageSerializer.DefaultOptions`
+- Replay responses explicitly surface available window and gap detection (`AvailableFromSequence`, `AvailableToSequence`, `GapDetected`)
+- Backward compatibility rule locked for contract v1: additive optional members allowed; renames/removals/semantic changes require major version bump
+- Committed as b4efdab, opened draft PR #36 (closes #2)
+- All tests pass; solution builds cleanly
+- **Awaiting:** Morpheus review feedback from comprehensive risk pass (8-point checklist + 7 ambiguities in `.squad/decisions.md`)
+- Next: Incorporate blocker resolutions before final reviewer signoff
+
 
