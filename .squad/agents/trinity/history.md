@@ -34,3 +34,9 @@
 - **Coordination note:** Trinity depends on Switch (#2 contract), Link (#13 endpoints), Morpheus (#12 token validation). Issue #16 gates Phase 1 completion.
 - **Status:** All team histories updated. Ready for MAUI project scaffolding and Phase 1 kickoff.
 
+### 2026-03-24T18:15:00Z — Issue #9 Shell Scaffold Landed
+
+- **Shell shape:** The MAUI app now uses a single-user shell flow of project selection → active session, with one in-focus mobile session at a time.
+- **Composition points:** Auth, project catalog, messaging, active-session state, and session lifecycle are registered behind app-side interfaces so #10/#21/#27/#28 can extend behavior without reshaping the host.
+- **Local dev stance:** Environment-specific embedded app settings can fall back to seed projects and offline pending sessions in Development when the broker is unavailable, keeping session UX work reviewable before the full datapath is online.
+

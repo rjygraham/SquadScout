@@ -6,6 +6,7 @@
     <Project Path="src/SquadScout.Functions/SquadScout.Functions.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/SquadScout.App.Tests/SquadScout.App.Tests.csproj" />
     <Project Path="tests/SquadScout.Broker.Tests/SquadScout.Broker.Tests.csproj" />
   </Folder>
 </Solution>

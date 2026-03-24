@@ -3,12 +3,14 @@
     x:Class="SquadScout.App.AppShell"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-    xmlns:local="clr-namespace:SquadScout.App"
+    xmlns:routes="clr-namespace:SquadScout.App.Navigation"
+    xmlns:views="clr-namespace:SquadScout.App.Views"
+    FlyoutBehavior="Disabled"
     Title="SquadScout">
 
     <ShellContent
-        Title="Sessions"
-        ContentTemplate="{DataTemplate local:MainPage}"
-        Route="MainPage" />
+        Title="Projects"
+        ContentTemplate="{DataTemplate views:ProjectSelectionPage}"
+        Route="{x:Static routes:AppRoutes.Projects}" />
 
 </Shell>
