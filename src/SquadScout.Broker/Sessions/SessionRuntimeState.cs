@@ -18,6 +18,8 @@ internal sealed class SessionRuntimeState
 
     public object SyncRoot { get; } = new();
 
+    public SemaphoreSlim ClientMessageGate { get; } = new(1, 1);
+
     public long Generation { get; private set; } = SessionEnvelopeContract.InitialGeneration;
 
     public long NextBrokerSequence { get; private set; } = 1;

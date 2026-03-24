@@ -77,23 +77,55 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
     public Task<SequenceValidationResult> ValidateClientMessageAsync<TPayload>(
         string sessionId,
         MessageEnvelope<TPayload> envelope,
+        CancellationToken cancellationToken = default) =>
+        AcceptClientMessageAsync(
+            sessionId,
+            envelope,
+            static (_, _) => Task.CompletedTask,
+            cancellationToken);
+
+    public async Task<SequenceValidationResult> AcceptClientMessageAsync<TPayload>(
+        string sessionId,
+        MessageEnvelope<TPayload> envelope,
+        Func<MessageEnvelope<TPayload>, CancellationToken, Task> onAcceptedAsync,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(onAcceptedAsync);
 
         var state = GetRequiredSessionState(sessionId);
         EnsureEnvelopeTargetsSession(envelope, state);
-        lock (state.SyncRoot)
-        {
-            var result = _sequenceValidator.Validate(state.CreateSnapshot(), envelope);
-            state.ApplyValidationResult(result);
 
-            return Task.FromResult(result);
+        await state.ClientMessageGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            SequenceValidationResult result;
+            lock (state.SyncRoot)
+            {
+                result = _sequenceValidator.Validate(state.CreateSnapshot(), envelope);
+                if (!result.IsAccepted || result.Status == SequenceValidationStatus.Duplicate)
+                {
+                    state.ApplyValidationResult(result);
+                    return result;
+                }
+            }
+
+            await onAcceptedAsync(envelope, cancellationToken).ConfigureAwait(false);
+
+            lock (state.SyncRoot)
+            {
+                state.ApplyValidationResult(result);
+                return result;
+            }
+        }
+        finally
+        {
+            state.ClientMessageGate.Release();
         }
     }
 
-    public Task<MessageEnvelope<ReplayResponsePayload>> ReplayAsync(
+    public async Task<MessageEnvelope<ReplayResponsePayload>> ReplayAsync(
         string sessionId,
         MessageEnvelope<ReplayRequestPayload> request,
         CancellationToken cancellationToken = default)
@@ -108,20 +140,29 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
 
         var state = GetRequiredSessionState(sessionId);
         EnsureEnvelopeTargetsSession(request, state);
-        lock (state.SyncRoot)
+
+        await state.ClientMessageGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            if (request.Generation == state.Generation)
+            lock (state.SyncRoot)
             {
-                var validation = _sequenceValidator.Validate(state.CreateSnapshot(), request);
-                if (!validation.IsAccepted)
+                if (request.Generation == state.Generation)
                 {
-                    throw new InvalidOperationException(validation.Reason ?? $"Replay request rejected with {validation.Status}.");
+                    var validation = _sequenceValidator.Validate(state.CreateSnapshot(), request);
+                    if (!validation.IsAccepted)
+                    {
+                        throw new InvalidOperationException(validation.Reason ?? $"Replay request rejected with {validation.Status}.");
+                    }
+
+                    state.ApplyValidationResult(validation);
                 }
 
-                state.ApplyValidationResult(validation);
+                return state.CreateReplayResponse(request);
             }
-
-            return Task.FromResult(state.CreateReplayResponse(request));
+        }
+        finally
+        {
+            state.ClientMessageGate.Release();
         }
     }
 

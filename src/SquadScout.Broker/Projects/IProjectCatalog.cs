@@ -4,6 +4,8 @@ namespace SquadScout.Broker.Projects;
 
 public interface IProjectCatalog
 {
+    Task<RegisteredProject?> GetAsync(string projectId, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyCollection<RegisteredProject>> ListAsync(CancellationToken cancellationToken = default);
 
     Task UpsertAsync(RegisteredProject project, CancellationToken cancellationToken = default);

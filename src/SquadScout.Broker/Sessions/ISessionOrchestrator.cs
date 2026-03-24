@@ -19,6 +19,12 @@ public interface ISessionOrchestrator
         MessageEnvelope<TPayload> envelope,
         CancellationToken cancellationToken = default);
 
+    Task<SequenceValidationResult> AcceptClientMessageAsync<TPayload>(
+        string sessionId,
+        MessageEnvelope<TPayload> envelope,
+        Func<MessageEnvelope<TPayload>, CancellationToken, Task> onAcceptedAsync,
+        CancellationToken cancellationToken = default);
+
     Task<MessageEnvelope<ReplayResponsePayload>> ReplayAsync(
         string sessionId,
         MessageEnvelope<ReplayRequestPayload> request,

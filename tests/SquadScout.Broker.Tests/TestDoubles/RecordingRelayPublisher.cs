@@ -59,6 +59,33 @@ public sealed class RecordingRelayPublisher : IRelayPublisher
         return Task.CompletedTask;
     }
 
+    public async Task<IReadOnlyList<MessageEnvelope<JsonElement>>> WaitForEnvelopeCountAsync(
+        int expectedCount,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (expectedCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(expectedCount), expectedCount, "Expected count must be non-negative.");
+        }
+
+        var deadlineUtc = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromSeconds(5));
+        while (DateTimeOffset.UtcNow <= deadlineUtc)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var envelopes = PublishedEnvelopes;
+            if (envelopes.Count >= expectedCount)
+            {
+                return envelopes;
+            }
+
+            await Task.Delay(10, cancellationToken).ConfigureAwait(false);
+        }
+
+        throw new TimeoutException($"Timed out waiting for {expectedCount} published envelope(s).");
+    }
+
     private static MessageEnvelope<JsonElement> ToSnapshot<TPayload>(MessageEnvelope<TPayload> envelope) =>
         new()
         {
