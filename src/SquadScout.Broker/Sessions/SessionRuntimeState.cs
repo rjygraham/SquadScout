@@ -14,7 +14,7 @@ internal sealed class SessionRuntimeState
         _replayBuffer = new CircularReplayBuffer(replayBufferCapacity);
     }
 
-    public SessionDescriptor Descriptor { get; }
+    public SessionDescriptor Descriptor { get; private set; }
 
     public object SyncRoot { get; } = new();
 
@@ -95,6 +95,11 @@ internal sealed class SessionRuntimeState
         if (envelope.Sequence is not null)
         {
             _replayBuffer.Append(ToSnapshot(envelope));
+        }
+
+        if (command.MessageType == SessionMessageType.SessionLifecycle && command.Payload is SessionLifecyclePayload lifecycle)
+        {
+            Descriptor = Descriptor with { State = lifecycle.State };
         }
 
         return envelope;
