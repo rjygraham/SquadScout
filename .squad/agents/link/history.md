@@ -50,3 +50,14 @@
 - **Wire shape tightened:** `src\SquadScout.Contracts\Messages\SessionMessageSerializer.cs` now omits null optional members so control frames do not emit ambiguous empty sequencing fields.
 - **Contract proof path:** `tests\SquadScout.Broker.Tests\MessageEnvelopeContractTests.cs` now covers broker-owned sequencing, client-owned sequencing, and generation mismatch handling for reconnect/replay safety.
 
+### Issue #3 Revision Assignment (2026-03-24T19:30:09Z)
+
+- **Previous owner:** Morpheus (Issue #3 implementation, commit `8068e81`)
+- **Revision owner:** Link (assigned by Switch formal review outcome)
+- **Reason for reassignment:** Morpheus is locked out after rejection; Link takes next revision cycle
+- **Coverage gaps to address:**
+  1. Add explicit `FutureGeneration` validation test in `tests\SquadScout.Broker.Tests\SessionSequenceValidatorTests.cs`
+  2. Add explicit `ProjectId` mismatch replay rejection test in `tests\SquadScout.Broker.Tests\InMemorySessionOrchestratorReplayTests.cs`
+- **Review context:** Switch verified build, focused broker tests (12/12), and full suite (20/20) all pass. No implementation bugs found. Rejection is purely coverage-driven per Switch charter.
+- **Next step:** Incorporate coverage gaps and request re-review from Switch or assigned reviewer before proceeding to Phase 2 grain activation.
+

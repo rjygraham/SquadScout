@@ -92,6 +92,15 @@
 - **Remaining high-risk coverage to demand:** Duplicate frames with changed ack, gap frames with ack interaction, future-generation validation, project-id mismatch, invalid replay request bounds (`FromSequenceInclusive`, `MaximumMessages`), and deterministic multi-page replay continuation.
 - **Verified commands for this review bar:** `dotnet build .\SquadScout.slnx -nologo`, focused broker test filter for `SessionSequenceValidatorTests|CircularReplayBufferTests|InMemorySessionOrchestratorReplayTests`, then `dotnet test .\SquadScout.slnx -nologo --no-build`.
 
+### Formal Review Outcome — Issue #3 / PR #37 (2026-03-25T19:30:09Z)
+
+- **Artifact reviewed:** PR #37 commit `8068e81` on `squad/3-sequence-validator-replay-buffer`; current branch HEAD only adds Scribe documentation on top of that implementation.
+- **Verification run:** `dotnet build .\SquadScout.slnx -nologo` passed cleanly, focused broker sequencing/replay tests passed (12/12), and full solution tests passed (20/20).
+- **Implementation strengths confirmed:** broker-owned monotonic sequencing, cumulative ack high-water tracking, 500-message circular replay model, explicit overflow/gap reporting, generation reset boundaries, heartbeat exclusion from replay, and session-id trust-boundary rejection.
+- **Blocking reviewer gap:** explicit failure-mode coverage is still missing for `FutureGeneration` validation and for replay rejection on project-id mismatch. The implementation paths exist (`src\SquadScout.Broker\Sessions\SessionSequenceValidator.cs`, `src\SquadScout.Broker\Sessions\InMemorySessionOrchestrator.cs`), but Switch charter does not allow approval without those tests.
+- **Recommended next reviser:** Link. Morpheus authored the artifact and is locked out for the next correction cycle after rejection.
+- **Verdict:** **REJECTED** — No implementation bug found; coverage is incomplete. Two explicit test gaps block approval until next revision cycle.
+
 ### Morpheus Issue #3 Delivery (2026-03-24)
 
 - **Branch:** `squad/3-sequence-validator-replay-buffer` (commit `8068e81`)

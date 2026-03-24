@@ -80,3 +80,23 @@
 - **Current coverage:** 6 areas strong, 7 areas needed before signoff (dup-ack, gap-ack, future-gen, project-id, invalid bounds, oversized batch, multi-page)
 - **Pattern worth preserving:** Replay buffer scope (broker-transcript only), explicit overflow window, generation reset boundary, trust checks
 
+### Issue #3 Formal Review Outcome (2026-03-24T19:30:09Z)
+
+**REJECTED by Switch.** Build passed, focused broker tests passed (12/12), full solution tests passed (20/20).
+
+**Strengths confirmed:**
+- Broker-owned monotonic sequencing with client-side validation
+- Cumulative ack high-water tracking (monotonic + idempotent)
+- 500-message circular replay model with explicit overflow/gap reporting
+- Generation reset boundaries with empty replay + metadata response
+- Heartbeat exclusion from replay storage
+- Session-id trust-boundary rejection
+
+**Blocking gaps (coverage-driven):**
+1. No focused test for `SequenceValidationStatus.FutureGeneration` path; ack state preservation unproven
+2. No separate trust-boundary test for project-id mismatch replay rejection (suite covers session-id only)
+
+**Revision owner:** Link (Morpheus locked out per team protocol for rejection correction cycle)
+
+**Impact:** Issue #3 remains unmerged; Phase 2 grain activation is blocked. No implementation bug found; coverage is the sole blocker. Morpheus is resting during Link's correction iteration.
+

@@ -19,6 +19,7 @@ Use this skill when a broker and client exchange realtime session traffic over a
 - **Define the ordering identity explicitly:** If ordered state can reset without changing `sessionId`, add a generation/restart marker. Otherwise guarantee a fresh session id on any reset.
 - **Replay must advertise the available window:** Include available head/tail sequence values and an explicit gap/overflow signal so the client can recover safely instead of silently skipping lost data.
 - **Generation mismatch should be a reset boundary, not cross-generation replay:** If a client requests replay for an older generation, respond with the current generation and available window metadata, set `gapDetected = true`, and avoid mixing old-generation requests with new-generation messages.
+- **Review both generation mismatch directions:** Keep stale-generation and future-generation validation as separate failure modes, and test that neither path mutates the broker's cumulative acknowledgement state.
 - **Sequence beats timestamp:** Timestamps are for diagnostics, leases, and correlation. Ordering, dedupe, and replay should use sequence plus stable message identifiers.
 - **Version the envelope early:** Add contract versioning before multiple components ship against the first draft.
 
