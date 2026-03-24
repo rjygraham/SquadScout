@@ -34,3 +34,11 @@
 - **Coordination note:** Issue #16 gates Phase 1→2; Issue #24 gates Phase 2→3. Link coordinates with Trinity (MAUI), Morpheus (auth/security), Switch (testing).
 - **Status:** All team histories updated. Ready for issue assignment and Phase 1 kickoff.
 
+### Issue #1 Scaffold Delivery (2026-03-24)
+
+- **Solution entrypoint:** `SquadScout.slnx` now owns the Phase 1 skeleton, with runtime projects under `src\` and validation in `tests\`.
+- **Shared source contract pattern:** `src\SquadScout.Contracts` is the cross-project contract source and multi-targets `net8.0;net10.0` so Functions can stay isolated-worker compatible while broker, MAUI, and tests move on `net10.0`.
+- **Broker seam placement:** `src\SquadScout.Broker` hosts localhost-only stubs for project registration, session orchestration, relay publishing, and config binding; Orleans and Web PubSub stay explicit seams rather than premature implementations.
+- **Platform-safe MAUI scaffold:** `src\SquadScout.App` only adds iOS/Mac Catalyst targets on macOS and Windows targets on Windows, which keeps the shared solution buildable from this Windows workstation.
+- **Verified validation path:** `dotnet build SquadScout.slnx && dotnet test SquadScout.slnx` succeeds after scaffold creation, giving later work a stable baseline.
+
