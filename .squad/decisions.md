@@ -68,3 +68,62 @@
 - ~~Maximum concurrent sessions~~ → Low, single-user scope (directive accepted)
 - ~~Multi-user support~~ → Deferred; design for scalability (directive accepted)
 
+## Ordered Implementation Backlog — 2026-03-25
+
+**From Neo's backlog synthesis (2026-03-25)**
+
+### Backlog Overview (Proposal)
+
+- **34 items** broken down across 4 phases (Days 1–9, Weeks 1–9)
+- **Structure:** 5 groups — Immediate (Days 1–5), Near-term (Weeks 2–3), Phase 2 (Weeks 4–5), Phase 3 (Weeks 6–7), Phase 4 (Weeks 8–9)
+- **First 3 items:** #1 Solution Scaffolding (Link), #2 Message Envelope Contract (Switch + Morpheus), #3 Sequence Validator & Replay Buffer (Morpheus + Switch)
+- **Phase gates:** #16 (E2E integration test), #24 (Grain & reconnect test suite), #34 (Security hardening sweep)
+- **Parallelism:** Items marked ‖ can run concurrently (e.g., #4 Mock PTY ‖ #5 CopilotPtyHost)
+
+### Immediate Phase (#1–#8, Days 1–5)
+
+- Proposal: Execute zero-dependency items: solution scaffold, message envelope, sequence validator, mock PTY, PTY host, relay logic, Azure Functions, input sanitizer
+- Owners: Link, Switch, Morpheus, Seraph
+- Dependencies: None — can start immediately
+- Status: **Proposal — awaiting user acceptance**
+
+### Near-term Phase (#9–#17, Weeks 2–3)
+
+- Proposal: Complete Phase 1 datapath (MAUI shell, PubSub connection, Entra auth, session endpoints, MAUI UX, E2E test)
+- Gate: #16 passes (Phase 1 integration test)
+- Owners: Trinity (MAUI), Link (broker endpoints), Morpheus (token validation), Seraph (Functions), Switch (testing)
+- Status: **Proposal — awaiting user acceptance**
+
+### Phase 2 (#18–#24, Weeks 4–5)
+
+- Proposal: Durable state via Orleans grains, grain migration, reconnect flow, heartbeat liveness, token refresh, grain test suite
+- Gate: #24 passes (grain & reconnect test suite)
+- Owners: Link (Orleans), Trinity (reconnect), Morpheus (heartbeat), Seraph (token refresh), Switch (tests)
+- Status: **Proposal — awaiting user acceptance**
+
+### Phase 3 (#25–#29, Weeks 6–7)
+
+- Proposal: Rich UX — Blazor Server web UI, project config CRUD, TTS service, STT service, voice test harness
+- Owners: Link (Blazor), Trinity (voice I/O), Switch (testing)
+- Status: **Proposal — awaiting user acceptance**
+
+### Phase 4 (#30–#34, Weeks 8–9)
+
+- Proposal: Hardening & polish — multi-broker identity, structured logging, graceful shutdown, diagnostic harness, security sweep
+- Gate: #34 passes (security hardening sweep)
+- Owners: Seraph (multi-broker), Link (logging/shutdown), Switch (diagnostics), Morpheus (security)
+- Status: **Proposal — awaiting user acceptance**
+
+### Key Insights
+
+- **Single highest-priority blocker:** Message envelope contract (#2) — everything depends on it
+- **Parallelism pattern:** When specialist proposals overlap, assign one unified workstream with sub-deliverables per owner rather than parallel streams
+- **Cross-cutting security:** Morpheus's security baseline (#8) runs in parallel with Phase 1 datapath (not deferred to Phase 4)
+- **Dependency flattening:** Items #1–#8 have minimal cross-dependencies; can execute 8 items in parallel in Week 1
+- **Integration gates enforce discipline:** Each phase must pass its gate test before proceeding
+
+### Reference
+
+- **Full backlog:** `.squad/decisions/inbox/neo-ordered-backlog.md` (34 items with done-when criteria, dependency graph)
+- **Derived from:** Unified Workstream Decomposition (2026-03-24) + all accepted user directives
+

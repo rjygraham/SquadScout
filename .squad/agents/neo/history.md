@@ -54,3 +54,18 @@
 - **Impact on decomposition:** Decomposition already incorporates all user directives; no scope changes needed. Ready for Phase 1 team execution.
 - **Status:** All open questions from architecture plan now closed by user directives. Proceeding to implementation.
 
+### 2026-03-25 — Ordered Implementation Backlog Delivered
+
+- **Output:** 34-item ordered backlog across 5 groups (Immediate / Near-term / Phase 2 / Phase 3 / Phase 4).
+- **First 3 to start:** #1 Solution Scaffolding (Link), #2 Message Envelope Contract (Switch + Morpheus), #3 Sequence Validator + Replay Buffer (Morpheus + Switch).
+- **Phase gates:** #16 (E2E integration test) gates Phase 1→2. #24 (grain & reconnect tests) gates Phase 2→3. #34 (security sweep) is the final gate.
+- **Decomposition pattern:** Workstreams (WS-1 through WS-14) were broken into 2–3 backlog items each, with explicit dependencies and done-when criteria. Items #1–#8 are granular enough to start immediately.
+- **Parallelism preserved:** Items marked ‖ can run concurrently (e.g., #4 Mock PTY ‖ #5 CopilotPtyHost, #7 Functions ‖ #5 PTY, #8 Security ‖ #6 Relay).
+- **Key file:** `.squad/decisions/inbox/neo-ordered-backlog.md`.
+
+### 2026-03-24T17:11:22Z — Ordered Implementation Backlog Merged to Decisions
+
+- **Process:** Scribe merged backlog entry from inbox to `.squad/decisions.md` under "Ordered Implementation Backlog — 2026-03-25" section. Deleted inbox file. Created orchestration log (2026-03-24T17-11-22Z-neo.md) and session log (2026-03-24T17-11-22Z-ordered-backlog.md).
+- **Status:** Backlog now **Proposal** in shared decisions.md, awaiting user acceptance before team execution.
+- **Next step:** Lead to accept backlog and dispatch Link, Switch, Morpheus for #1–#3 kickoff.
+
