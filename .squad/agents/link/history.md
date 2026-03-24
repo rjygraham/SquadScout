@@ -26,3 +26,11 @@
 - **MudBlazor selected** for project configuration UI (WS-3 local web UI scope).
 - **Status:** Scribe consolidated all directives to decisions.md. Team workstreams finalized; ready to proceed with Phase 1 execution.
 
+### 2026-03-24T17:31:17Z — GitHub Issues Backlog Imported
+
+- **Import context:** Neo created GitHub issues #1–#34 in rjygraham/SquadScout with full phase gate preservation and routing labels.
+- **Link ownership:** Issues #1 (Solution scaffolding), #6 (Relay pipeline), #13 (Session endpoints), #18 (Orleans host), #20 (Project grain), #25 (Blazor UI), #31 (Logging), #32 (Graceful shutdown).
+- **Label pattern:** All issues tagged with `squad` + owner label (e.g., `squad:link`) + phase label (e.g., `phase:1`).
+- **Coordination note:** Issue #16 gates Phase 1→2; Issue #24 gates Phase 2→3. Link coordinates with Trinity (MAUI), Morpheus (auth/security), Switch (testing).
+- **Status:** All team histories updated. Ready for issue assignment and Phase 1 kickoff.
+

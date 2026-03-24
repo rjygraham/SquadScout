@@ -127,3 +127,68 @@
 - **Full backlog:** `.squad/decisions/inbox/neo-ordered-backlog.md` (34 items with done-when criteria, dependency graph)
 - **Derived from:** Unified Workstream Decomposition (2026-03-24) + all accepted user directives
 
+## GitHub Issues Import — 2026-03-24
+
+**From Neo's GitHub backlog export (2026-03-24)**
+
+### Context
+
+Ryan asked Neo to turn the full ordered local backlog into real GitHub issues in `rjygraham/SquadScout`, preserve execution order, add Squad routing labels, and avoid duplicating existing open issues.
+
+### Team-Relevant Decisions
+
+- The canonical detailed backlog artifact (`.squad/decisions/inbox/neo-ordered-backlog.md`) had already been deleted after Scribe merged the summary into `.squad/decisions.md`.
+- To avoid blocking execution, the issue bodies were reconstructed from the merged backlog section in `.squad/decisions.md`, the ordered-backlog session log, `.squad/routing.md`, and the specialist agent histories.
+- Order and gates were preserved explicitly in titles/bodies:
+  - `Backlog #16` remains the **Phase 1 → Phase 2** gate.
+  - `Backlog #24` remains the **Phase 2 → Phase 3** gate.
+  - `Backlog #34` remains the **final hardening gate**.
+- Routing labels were standardized for future pickup:
+  - `squad`
+  - `squad:link`, `squad:trinity`, `squad:seraph`, `squad:morpheus`, `squad:switch`, `squad:neo`
+  - `phase:1`, `phase:2`, `phase:3`, `phase:4`
+
+### Duplicate Check
+
+- Existing open GitHub issues checked before import: **none**
+- Duplicates skipped during import: **none**
+
+### Mapping
+
+| Backlog item | GitHub issue | Title |
+| --- | --- | --- |
+| #01 | #1 | Solution & Project Scaffolding |
+| #02 | #2 | Message Envelope Contract |
+| #03 | #3 | Sequence Validator & Circular Replay Buffer |
+| #04 | #4 | Mock PTY Harness |
+| #05 | #5 | CopilotPtyHost (Direct Spawn) |
+| #06 | #6 | Broker Relay Pipeline |
+| #07 | #7 | Azure Function Negotiate Endpoint |
+| #08 | #8 | Input Sanitization & Secret-Safe Logging Baseline |
+| #09 | #9 | MAUI App Shell Scaffolding |
+| #10 | #10 | MAUI Session Transcript UI |
+| #11 | #11 | PubSub Client Connection Service |
+| #12 | #12 | Token Validation & Session Claims Hardening |
+| #13 | #13 | Broker Session Start/Stop Endpoints |
+| #14 | #14 | PubSub Session Routing & Group Membership |
+| #15 | #15 | MAUI Project & Session UX Polish |
+| #16 | #16 | End-to-End Phase 1 Datapath Gate |
+| #17 | #17 | Phase 1 Session Telemetry & Replay Diagnostics |
+| #18 | #18 | Orleans Silo Host & SQLite Bootstrap |
+| #19 | #19 | Session Grain & Durable Replay State |
+| #20 | #20 | Project Grain & State Migration Path |
+| #21 | #21 | Reconnect & Replay Resume Flow |
+| #22 | #22 | Heartbeat & Liveness Model |
+| #23 | #23 | Token Refresh & Session Rejoin Flow |
+| #24 | #24 | Grain & Reconnect Test Suite Gate |
+| #25 | #25 | MudBlazor Local Admin UI Shell |
+| #26 | #26 | Project Configuration CRUD & Persistence |
+| #27 | #27 | MAUI Text-to-Speech Playback |
+| #28 | #28 | MAUI Speech-to-Text Composer |
+| #29 | #29 | Voice I/O Test Harness & Accessibility Pass |
+| #30 | #30 | Multi-Broker Identity & Session Affinity |
+| #31 | #31 | Structured Logging & Correlation IDs |
+| #32 | #32 | Graceful Shutdown & Resume-Safe Lifecycle |
+| #33 | #33 | Diagnostic Harness & Session Export Tooling |
+| #34 | #34 | Security Hardening Sweep & Final Gate |
+

@@ -64,8 +64,24 @@
 - **Key file:** `.squad/decisions/inbox/neo-ordered-backlog.md`.
 
 ### 2026-03-24T17:11:22Z — Ordered Implementation Backlog Merged to Decisions
-
+ 
 - **Process:** Scribe merged backlog entry from inbox to `.squad/decisions.md` under "Ordered Implementation Backlog — 2026-03-25" section. Deleted inbox file. Created orchestration log (2026-03-24T17-11-22Z-neo.md) and session log (2026-03-24T17-11-22Z-ordered-backlog.md).
 - **Status:** Backlog now **Proposal** in shared decisions.md, awaiting user acceptance before team execution.
 - **Next step:** Lead to accept backlog and dispatch Link, Switch, Morpheus for #1–#3 kickoff.
+
+### 2026-03-24 — Ordered Backlog Published to GitHub Issues
+
+- **Repo target:** `rjygraham/SquadScout`.
+- **Issue import result:** Created the full ordered backlog as GitHub issues **#1–#34** with a direct backlog-to-issue mapping and no open-issue duplicates to skip.
+- **Labeling pattern:** Added reusable routing labels `squad:{member}` and execution labels `phase:{1..4}`; every backlog issue carries `squad`, one owner label, and one phase label.
+- **Recovery decision:** The detailed `neo-ordered-backlog.md` artifact had already been deleted after merge, so the issue bodies were reconstructed from `.squad/decisions.md`, the ordered-backlog session log, routing metadata, and agent histories while preserving the original order, dependencies, and phase gates (#16, #24, #34).
+- **Key files:** `.squad/decisions.md`, `.squad/decisions/inbox/neo-github-issues.md`, `.squad/skills/backlog-to-github-issues/SKILL.md`.
+
+### 2026-03-24T17:31:17Z — Scribe Processing Complete
+
+- **Scribe task:** Merged GitHub issues import decision from inbox to `.squad/decisions.md`.
+- **Team histories updated:** Neo, Link, Trinity, Switch all received GitHub import context.
+- **Logs created:** Orchestration log (2026-03-24T17-31-17Z-scribe.md) and session log (2026-03-24T17-31-17Z-github-issue-import.md).
+- **Git commit:** `.squad/` directory staged and committed.
+- **Status:** All scribe tasks complete. Team has full visibility into GitHub issues import and label routing pattern.
 

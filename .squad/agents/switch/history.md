@@ -42,3 +42,14 @@
 - **Message envelope locked to shared source project (SquadScout.Contracts).** Directly impacts WS-1 (contract) execution. No NuGet package abstraction needed for MVP.
 - **First executable slice confirms test strategy.** Days 1–5 with zero external dependencies validates sequence/replay correctness before Orleans or PubSub complexity.
 - **Status:** All 6 Switch workstreams (envelope design, property-based tests, mock harness, reconnect tests, observability instrumentation, voice I/O cross-cutting) aligned to Neo's unified plan. WS-1 is critical path, starts immediately with Morpheus.
+
+### 2026-03-24T17:31:17Z — GitHub Issues Backlog Imported
+
+- **Import context:** Neo created GitHub issues #1–#34 in rjygraham/SquadScout with full phase gate preservation and routing labels.
+- **Switch ownership:** Issues #3 (Sequence validator), #4 (Mock PTY), #16 (Phase 1 E2E test gate), #24 (Grain & reconnect test gate), #29 (Voice test harness), #33 (Diagnostic harness).
+- **Label pattern:** All issues tagged with `squad` + owner label (e.g., `squad:switch`) + phase label (e.g., `phase:1`/`phase:2`/`phase:4`).
+- **Critical path:** Issue #3 (Sequence Validator) unblocks Issues #2 (Message Envelope), #4 (Mock PTY), and #16 (E2E gate).
+- **Gate responsibilities:** Switch owns #16 (Phase 1→2 gate) and #24 (Phase 2→3 gate). These issues require all dependent workstreams to pass before proceeding.
+- **Status:** All team histories updated. Ready for test strategy kickoff and Phase 1 test harness creation.
+
+
