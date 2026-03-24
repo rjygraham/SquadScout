@@ -52,4 +52,11 @@
 - **Gate responsibilities:** Switch owns #16 (Phase 1→2 gate) and #24 (Phase 2→3 gate). These issues require all dependent workstreams to pass before proceeding.
 - **Status:** All team histories updated. Ready for test strategy kickoff and Phase 1 test harness creation.
 
+### Issue #2 Message Envelope Contract (2026-03-25)
+
+- **Shared contract path:** Session envelope types now live under `src\SquadScout.Contracts\Messages\` and use `SessionMessageSerializer.DefaultOptions` for stable camelCase + string-enum JSON across components.
+- **Replay safety pattern:** `ReplayResponsePayload` exposes requested range, available replay window, and `GapDetected` so reconnect failures can surface overflow explicitly instead of corrupting transcript state silently.
+- **Single source of truth:** Sequence acknowledgements stay on `MessageEnvelope<TPayload>.AcknowledgedSequence`; heartbeat payloads carry only liveness metadata to avoid duplicate ack state.
+- **Contract coverage:** Representative wire-contract tests live in `tests\SquadScout.Broker.Tests\MessageEnvelopeContractTests.cs`, including serialization shape, replay snapshot shape, and optional-field deserialization for backward-compatible additions.
+
 
