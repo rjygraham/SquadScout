@@ -1,0 +1,13 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "Functions__WebPubSubEndpoint": "https://your-service.webpubsub.azure.com",
+    "Functions__WebPubSubHub": "squadscout",
+    "Functions__TokenLifetimeMinutes": "60",
+    "Functions__EnableLocalDevelopmentIdentity": "true",
+    "Functions__DevelopmentUserId": "local-dev",
+    "Functions__DevelopmentUserDisplayName": "Local Developer"
+  }
+}
