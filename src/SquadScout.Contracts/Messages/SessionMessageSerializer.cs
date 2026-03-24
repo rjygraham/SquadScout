@@ -11,6 +11,7 @@ public static class SessionMessageSerializer
     {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
         {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
             PropertyNameCaseInsensitive = false,
             WriteIndented = false
         };

@@ -5,8 +5,11 @@ namespace SquadScout.Contracts.Messages;
 /// Within a major version, changes must remain backward compatible by adding optional members or
 /// new message types only. Renaming/removing fields, changing sequence/acknowledgement semantics,
 /// or changing required payload meaning requires a new major version.
+/// Ordered broker replay state is identified by <c>{ sessionId, generation, sequence }</c>.
 /// </summary>
 public static class SessionEnvelopeContract
 {
     public const int CurrentVersion = 1;
+
+    public const long InitialGeneration = 1;
 }

@@ -2,7 +2,8 @@ namespace SquadScout.Contracts.Messages;
 
 /// <summary>
 /// Carries a single sequenced message across the broker, mobile client, and replay pipeline.
-/// Sequence and acknowledgement values are session-scoped and remain the application-level source of truth.
+/// Ordered broker replay frames are identified by <c>{ sessionId, generation, sequence }</c>, while
+/// client-authored traffic can carry its own client-local sequence for dedupe and correlation.
 /// </summary>
 /// <typeparam name="TPayload">The strongly typed message payload.</typeparam>
 public sealed record MessageEnvelope<TPayload>
@@ -13,12 +14,33 @@ public sealed record MessageEnvelope<TPayload>
 
     public string SessionId { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Broker-minted ordered-state generation for this session. If the broker or PTY resets ordered
+    /// state without minting a new session id, it must increment this value before emitting more
+    /// broker frames. Client frames echo the latest broker generation they are acting against.
+    /// </summary>
+    public long Generation { get; init; } = SessionEnvelopeContract.InitialGeneration;
+
     public SessionMessageType MessageType { get; init; }
 
     public MessageDirection Direction { get; init; }
 
-    public long Sequence { get; init; }
+    /// <summary>
+    /// Broker-owned monotonic sequence for replayable broker-to-client frames. Leave unset for
+    /// client-authored traffic and for broker control frames that are intentionally outside replay.
+    /// </summary>
+    public long? Sequence { get; init; }
 
+    /// <summary>
+    /// Optional client-owned sequence for client-to-broker traffic. This value never participates in
+    /// broker replay ordering and is only used for client-local dedupe and correlation.
+    /// </summary>
+    public long? ClientSequence { get; init; }
+
+    /// <summary>
+    /// Cumulative acknowledgement of the highest contiguous broker-owned sequence the client has
+    /// applied within the current generation. This value resets when the generation changes.
+    /// </summary>
     public long? AcknowledgedSequence { get; init; }
 
     public DateTimeOffset TimestampUtc { get; init; } = DateTimeOffset.UtcNow;

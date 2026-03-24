@@ -42,3 +42,11 @@
 - **Platform-safe MAUI scaffold:** `src\SquadScout.App` only adds iOS/Mac Catalyst targets on macOS and Windows targets on Windows, which keeps the shared solution buildable from this Windows workstation.
 - **Verified validation path:** `dotnet build SquadScout.slnx && dotnet test SquadScout.slnx` succeeds after scaffold creation, giving later work a stable baseline.
 
+### Issue #2 Revision — Message Envelope Reset Safety (2026-03-25)
+
+- **Replay identity locked:** Ordered broker frames now use `{ sessionId, generation, sequence }` as the replay identity, with `Generation` incrementing whenever ordered state resets without minting a new session id.
+- **Sequence ownership clarified:** `src\SquadScout.Contracts\Messages\MessageEnvelope.cs` now treats `Sequence` as a broker-owned, replay-only field and adds `ClientSequence` for client-originated dedupe/correlation so client traffic cannot accidentally join the broker replay domain.
+- **Reset boundary made explicit:** `src\SquadScout.Contracts\Messages\ReplayResponsePayload.cs` repeats the active replay `Generation`, and acknowledgements reset with generation changes.
+- **Wire shape tightened:** `src\SquadScout.Contracts\Messages\SessionMessageSerializer.cs` now omits null optional members so control frames do not emit ambiguous empty sequencing fields.
+- **Contract proof path:** `tests\SquadScout.Broker.Tests\MessageEnvelopeContractTests.cs` now covers broker-owned sequencing, client-owned sequencing, and generation mismatch handling for reconnect/replay safety.
+
