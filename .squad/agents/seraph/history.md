@@ -36,3 +36,46 @@
 - **Single-user + multi-machine design confirmed.** Design local broker scaffolding to support multiple developers with separate Azure credentials; no shared multi-user backend until post-MVP.
 - **App-level sequencing/replay via Orleans confirmed** as source of truth, not Web PubSub features. Service-tier reliability features not required; Orleans grain single-threaded execution enforces atomicity.
 - **Status:** All 6 Seraph workstreams aligned to Neo's unified decomposition. WS-3 (PubSub routing) and WS-4 (token refresh/reconnect) priority path locked. Ready for Phase 1 execution.
+
+### 2026-03-25: Merge Watcher — PR #41 & #42 Monitoring
+
+**Task:** Explicitly watch PR #41 and #42, merge only when clean.
+
+**PR #42 Status:**
+- Title: Implement issue #8 safety baseline
+- State: **MERGED** (2026-03-24T22:28:52Z, beat #41 by ~2 minutes)
+- Merge commit: User (`rjygraham`)
+- Issue #8: Closed
+- Checks: heartbeat SUCCESS ✓
+
+**PR #41 Status (Seraph action):**
+- Title: Implement Azure Function negotiate endpoint
+- State: **OPEN** → **MERGED** (2026-03-24T18:30:09Z)
+- Merge strategy: Create commit merge (single logical commit preserved)
+- Pre-merge checklist:
+  - Merge state: CLEAN ✓
+  - Reviews: 0 (none blocking) ✓
+  - Checks: 0 (no failures) ✓
+  - Comments: 0 (no discussion) ✓
+  - Conflicts: None ✓
+- Key artifact: `src/SquadScout.Cloud/NegotiateFunction.cs` — Azure Function trusted boundary (Easy Auth, managed-identity token minting, session groups, localhost fallback)
+- Issue #7: Auto-closed by PR body
+
+**Outcome:**
+- Both PRs now merged to main
+- WS-2 (Function integration) trusted boundary tier complete
+- WS-3 (PubSub routing) unblocked
+- Merge conflict minimized via early merge before dependent work accumulates
+
+### Issue #9 Handoff — Trinity Implementation Complete (2026-03-24T23:39:21Z)
+
+**Status:** MAUI App Shell Scaffolding complete; PR #43 in review (awaiting Switch gate)
+
+**Context:** Trinity completed issue #9 MAUI app shell scaffolding with cross-platform support and chat-like terminal UI. Build green, 36 tests pass. PR #43 opened; Switch begins formal review.
+
+**Impact on Seraph Workstreams:**
+- WS-3 (PubSub routing): Trinity's MAUI client integration now available to pair with Link's relay pipeline (issue #6).
+- WS-4 (token refresh/reconnect): MAUI session bindings ready to receive negotiated tokens from NegotiateFunction (PR #41 already merged).
+- **No blocking dependencies:** Trinity's implementation uses existing shared Contracts; no new contract changes on issue #9 critical path.
+
+**Next:** Awaiting Switch approval. Once PR #43 merges, MAUI client tier can integrate with broker relay pipeline (issue #6, Link/Seraph parallel work).

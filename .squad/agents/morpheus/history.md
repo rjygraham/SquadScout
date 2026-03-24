@@ -100,3 +100,40 @@
 
 **Impact:** Issue #3 remains unmerged; Phase 2 grain activation is blocked. No implementation bug found; coverage is the sole blocker. Morpheus is resting during Link's correction iteration.
 
+### Issue #8 / PR #42 Merge Completion (2026-03-24T22:28:52Z)
+
+**MERGED — Squash.** Input Sanitization & Secret-Safe Logging baseline is now on main.
+
+**Pre-merge verification:**
+- Clean merge state, no conflicts, no blockers
+- Build: ✅ (8.6s, all projects)
+- Tests: ✅ (16.1s, all broker tests)
+- Changes: 274 additions, 3 deletions across 11 files
+- Base already ancestor (no rebase needed)
+
+**Merge strategy rationale:**
+- Squash flatten to preserve logical unit (single input-sanitization concern)
+- Reduces main history fragmentation vs. multi-commit merge
+- Minimizes downstream conflict surface for dependent branches
+- Preserves closure semantic: `closes #8` auto-closed the issue on merge
+
+**Outcome:** Issue #8 closed. Phase 1 security baseline (sanitization + secret redaction) unblocks feature teams. No downstream rework needed.
+
+### Issue #9 Handoff — Trinity Implementation Complete (2026-03-24T23:39:21Z)
+
+**Status:** MAUI App Shell Scaffolding complete; PR #43 in review (awaiting Switch gate)
+
+**Trinity Deliverables:**
+- MAUI cross-platform app shell with scaffolds for iOS, macOS Catalyst, Android, Windows
+- Chat-like terminal rendering UI (native MAUI controls per user directive)
+- Session start/stop command bindings
+- Message envelope integration with shared Contracts
+- 36 tests, all passing
+
+**Build & Test Status:**
+- ✅ Full solution compiles
+- ✅ All 36 tests pass
+- ✅ Branch clean, no conflicts
+
+**Next:** Switch formal code review and acceptance gate on PR #43 (closes issue #9). Morpheus observing; no direct blocker on replay/security path from issue #9 unless contract changes emerge during review.
+
