@@ -489,3 +489,47 @@ The implementation fully satisfies the acceptance bar.
 
 **Status:** Accepted (implemented and approved by Switch).
 
+## Switch — Issue #9 MAUI App Shell Scaffolding Review (2026-03-25)
+
+**Reviewer:** Switch  
+**Artifact:** PR #43 `squad/9-maui-app-shell-scaffolding`  
+**Requested by:** Ryan Graham
+
+**Verdict:** APPROVED
+
+### Validation
+
+- ✅ `dotnet build .\SquadScout.slnx -nologo`
+- ✅ `dotnet test .\SquadScout.slnx -nologo --no-build`
+- ✅ `dotnet test .\SquadScout.slnx -nologo` (36/36 tests passing; SquadScout.App builds for Windows and Android during test run)
+
+### Findings
+
+- MAUI shell scaffolding meets product intent: project-selection and active-session routes, auth/messaging/project-catalog/session-lifecycle seams registered.
+- Development config supports seeded projects and offline pending sessions (reviewable before broker datapath online).
+- App-shell test project validates fallback/state logic without resizetizer pull into test assembly.
+- **Regression clear:** No duplicate `appicon.svg` output regression; appicon/resizetizer test path now passes.
+
+### Review Decision
+
+Approved for merge. Deliverable complete: MAUI app shell ready for Phase 2 Orleans integration.
+
+**Next:** Trinity monitors merge CI and post-merge build health. Ready to advance to next workstream.
+
+## Trinity — Merge Watch Issue #9 (PR #43) (2026-03-25)
+
+**Role:** Merge watcher  
+**Artifact:** PR #43 `squad/9-maui-app-shell-scaffolding` → `main`
+
+**Assignment:** Switch approved PR #43; Trinity monitors merge completion and validates main branch health.
+
+**Watch scope:**
+- Pre-merge CI validation
+- Post-merge build: `dotnet build .\SquadScout.slnx -nologo`
+- Post-merge tests: `dotnet test .\SquadScout.slnx -nologo`
+- Regression monitoring: appicon/resizetizer, shell navigation
+
+**Decision gate:** If post-merge CI or validation fails, escalate to Neo for rollback vs. revision decision. If all validation passes, record successful closure of issue #9 and advance team to next workstream (Phase 2 Orleans grains or queued backlog).
+
+**Status:** Active — waiting for merge trigger.
+
