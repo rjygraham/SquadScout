@@ -1,3 +1,5 @@
+using SquadScout.Contracts.Security;
+
 namespace SquadScout.Broker.Configuration;
 
 public sealed class CopilotPtyHostOptions
@@ -15,6 +17,8 @@ public sealed class CopilotPtyHostOptions
     public int InitialColumns { get; set; } = 120;
 
     public int OutputBufferSize { get; set; } = 1024;
+
+    public int MaxInputCharactersPerWrite { get; set; } = PtyInputSanitizer.DefaultMaxInputCharactersPerWrite;
 
     public Dictionary<string, string> Environment { get; set; } = [];
 }
