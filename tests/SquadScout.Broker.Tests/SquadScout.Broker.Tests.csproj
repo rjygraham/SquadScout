@@ -3,11 +3,13 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>false</IsPackable>
+    <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="sch.pty.net" Version="0.3.36-pre" PrivateAssets="all" GeneratePathProperty="true" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
   </ItemGroup>
@@ -20,5 +22,16 @@
     <ProjectReference Include="..\..\src\SquadScout.Broker\SquadScout.Broker.csproj" />
     <ProjectReference Include="..\..\src\SquadScout.Contracts\SquadScout.Contracts.csproj" />
   </ItemGroup>
+
+  <Target Name="CopyPtyNetNativeFiles" AfterTargets="Build" Condition="'$(PlatformTarget)' != '' and '$(PlatformTarget)' != 'AnyCPU'">
+    <ItemGroup>
+      <PtyNetNativeFiles Include="$(Pkgsch_pty_net)\build\$(PlatformTarget)\**\*" />
+    </ItemGroup>
+
+    <Copy
+      SourceFiles="@(PtyNetNativeFiles)"
+      DestinationFiles="@(PtyNetNativeFiles->'$(OutDir)%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

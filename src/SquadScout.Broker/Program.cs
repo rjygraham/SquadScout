@@ -1,4 +1,5 @@
 using SquadScout.Broker.Configuration;
+using SquadScout.Broker.Pty;
 using SquadScout.Broker.Projects;
 using SquadScout.Broker.Relay;
 using SquadScout.Broker.Sessions;
@@ -9,7 +10,10 @@ var brokerOptions = builder.Configuration.GetSection(BrokerHostOptions.SectionNa
 builder.WebHost.UseUrls(brokerOptions.ListenUrl);
 
 builder.Services.Configure<BrokerHostOptions>(builder.Configuration.GetSection(BrokerHostOptions.SectionName));
+builder.Services.Configure<CopilotPtyHostOptions>(builder.Configuration.GetSection(CopilotPtyHostOptions.SectionName));
 builder.Services.AddSingleton<IProjectCatalog, InMemoryProjectCatalog>();
+builder.Services.AddSingleton<IPtyHost, CopilotPtyHost>();
+builder.Services.AddSingleton<PtySessionEnvelopePump>();
 builder.Services.AddSingleton<IRelayPublisher, NullRelayPublisher>();
 builder.Services.AddSingleton<ISequenceValidator, SessionSequenceValidator>();
 builder.Services.AddSingleton<ISessionOrchestrator, InMemorySessionOrchestrator>();

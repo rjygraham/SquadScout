@@ -141,7 +141,17 @@ public sealed class MockPtySession : IPtySession
         return Task.CompletedTask;
     }
 
-    public bool TryReadEvent(out PtySessionEvent @event) => _events.Reader.TryRead(out @event);
+    public bool TryReadEvent(out PtySessionEvent @event)
+    {
+        if (_events.Reader.TryRead(out var nextEvent))
+        {
+            @event = nextEvent;
+            return true;
+        }
+
+        @event = null!;
+        return false;
+    }
 
     public ValueTask<PtySessionEvent> ReadEventAsync(CancellationToken cancellationToken = default) =>
         _events.Reader.ReadAsync(cancellationToken);
