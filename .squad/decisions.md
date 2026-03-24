@@ -311,6 +311,76 @@ Ryan asked Neo to turn the full ordered local backlog into real GitHub issues in
 | #17 | #17 | Phase 1 Session Telemetry & Replay Diagnostics |
 | #18 | #18 | Orleans Silo Host & SQLite Bootstrap |
 | #19 | #19 | Session Grain & Durable Replay State |
+
+## User Directives — 2026-03-24T22:25:35Z
+
+**From Ryan Graham (via Copilot)**
+
+- **Accepted:** Ensure PRs are merged in a way that minimizes merge conflicts.
+
+## PR Merge Watcher — PR #42 & #41 (2026-03-24–2026-03-25)
+
+**Owner:** Morpheus & Seraph  
+**Task:** Explicitly watch PR #41 and #42 for clean merge conditions
+
+### PR #42 Status
+
+**Title:** Implement issue #8 safety baseline  
+**Issue Closed:** #8  
+**Merge Timestamp:** 2026-03-24T22:28:52Z  
+**Merge Commit:** 7d9c3c7  
+
+**Merge Strategy:** Squash merge  
+**Rationale:** Single logical unit, minimize main history clutter, reduce downstream merge conflict surface
+
+**Verification:** ✅ Issue #8 auto-closed on merge; build and broker tests passed
+
+### PR #41 Status
+
+**Title:** Implement Azure Function negotiate endpoint  
+**Issue Closed:** #7  
+**Merge Timestamp:** 2026-03-24T18:30:09Z  
+**Merge Commit:** 377581a  
+
+**Merge Strategy:** Standard commit merge (preserve history)  
+**Rationale:** Single logical commit, readable linear history, aligns with rebase-first conflict-minimization philosophy
+
+**Verification:** ✅ Issue #7 auto-closed on merge; no follow-up fixes required
+
+**Key Pattern Locked:** Session group naming `session:{projectId}:{sessionId}[:brokerId]`, managed-identity token flow, localhost dev fallback
+
+## Wave 1 Launch Validation & Phase Routing (2026-03-25)
+
+**Lead:** Neo  
+**Status:** Approved for execution
+
+### Issue #1 Reconciliation
+
+All deliverables shipped to main (commit `228c0c1`):
+- Multi-project solution structure (`.sln` + `.slnx`)
+- MAUI app baseline (all platforms: iOS, macOS Catalyst, Android, Windows)
+- Broker host skeleton with DI and configuration
+- Contracts project with shared message types
+- Azure Functions baseline with `NegotiateFunction` stub
+- Test project scaffold (`SquadScout.Broker.Tests`)
+- Directory build props & .NET 10 configuration
+
+**Decision:** Close issue #1 with reference to shipped commit `228c0c1` and PR #35
+
+### Wave 1 Branches Ready
+
+| Issue | Branch | Owner | Status | Merge Base |
+|-------|--------|-------|--------|-----------|
+| #6 | `squad/6-broker-relay-pipeline` | Seraph | Ready | `6d2160f` |
+| #7 | `squad/7-azure-function-negotiate-endpoint` | Trinity | Ready → Merged | `6d2160f` |
+| #8 | `squad/8-input-sanitization-secret-safe-logging` | Morpheus | Ready → Merged | `6d2160f` |
+| #9 | `squad/9-maui-app-shell-scaffolding` | Trinity | Ready → In Review (PR #43) | `6d2160f` |
+
+**Execution Plan:** Phase 1B — Broker & Azure Integration (Issues #6–#9, parallel execution)
+
+**Integration gate:** Issue #16 (E2E integration test) must pass before Phase 2 (Orleans grains & reconnect)
+
+**Decision:** Approved. Launch wave 1 for parallel execution.
 | #20 | #20 | Project Grain & State Migration Path |
 | #21 | #21 | Reconnect & Replay Resume Flow |
 | #22 | #22 | Heartbeat & Liveness Model |
