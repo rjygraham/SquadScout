@@ -28,12 +28,11 @@
 - **Next steps:** Team to review proposed decisions; Lead to initiate Phase 1 implementation agents (Link, Seraph, Trinity).
 - **Key open questions:** Terminal rendering (SkiaSharp vs. xterm.js), Copilot spawn mode, message contract sharing, Orleans SQLite provider choice.
 
-### 2026-07-14 — Orleans SQLite Provider Research
+### 2026-03-24 — Orleans SQLite Provider Decision (Accepted)
 
-- **Recommendation (proposed):** Use `Microsoft.Orleans.Persistence.AdoNet` (10.0.x) + `Microsoft.Data.Sqlite` for grain storage. Pair with `UseLocalhostClustering()`. No clustering or reminders DB needed.
+- **Recommendation (accepted):** Use `Microsoft.Orleans.Persistence.AdoNet` (10.0.x) + `Microsoft.Data.Sqlite` for grain storage. Pair with `UseLocalhostClustering()`. No clustering or reminders DB needed.
 - **Key finding:** Orleans 10 ships official `Sqlite-Persistence.sql` DDL scripts and registers `Microsoft.Data.Sqlite` in `DbConnectionFactory.cs`. The Orleans test suite (`SqlitePersistenceGrainStorageFixture.cs`) exercises this path.
 - **Gap:** No official `Sqlite-Clustering.sql` or `Sqlite-Reminders.sql` scripts exist. Irrelevant for Phase 2 (single silo, grain timers not reminders).
 - **Risk:** GitHub issue dotnet/orleans#8187 (2022, still open) flagged invariant registration bugs in Orleans 7. Source inspection confirms fixed on main for Orleans 10. Smoke test recommended.
-- **Proposal file:** `.squad/decisions/inbox/neo-orleans-sqlite-provider.md`
-- **User preference confirmed:** Ryan wants decisive calls, not option menus.
+- **Status:** Merged to `.squad/decisions.md`. Ready for Phase 2 implementation team (Link, Seraph, Trinity).
 

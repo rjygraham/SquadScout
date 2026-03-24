@@ -36,13 +36,20 @@
 - Message envelope with sequence numbers, heartbeats, and replay semantics as defined in §4.
 - Session lifecycle: grain activation → PTY spawn; grain deactivation → PTY kill.
 
+### Orleans SQLite Provider (Accepted — 2026-03-24)
+
+- **Adopted:** `Microsoft.Orleans.Persistence.AdoNet` (10.0.x) + `Microsoft.Data.Sqlite` for grain storage.
+- **Clustering:** `UseLocalhostClustering()` for in-memory membership (no clustering DB needed).
+- **Schema bootstrap:** Run `Sqlite-Main.sql` + `Sqlite-Persistence.sql` on broker startup if tables absent.
+- **Rationale:** First-party support, perfect fit for single-silo Phase 2 constraints, zero infrastructure, easy migration path to server DB later.
+- **Risk:** GitHub issue dotnet/orleans#8187 (2022, fixed in Orleans 10 main). Early smoke test with NuGet versions recommended.
+
 ## Open Questions
 
 - Terminal rendering strategy in MAUI (SkiaSharp vs. xterm.js via WebView)?
 - Copilot spawn mode (direct vs. inside shell)?
 - Message contract sharing (shared project vs. NuGet package)?
 - Broker lifecycle (foreground app vs. Windows Service / systemd)?
-- Orleans SQLite provider choice (official ADO.NET vs. community package)?
 - Maximum concurrent sessions per broker (benchmarking needed).
 - Broker as service vs. foreground app (Phase 4 decision).
 
