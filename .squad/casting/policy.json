@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "preferredUniverse": "The Matrix",
+  "assignmentStrategy": "deterministic",
+  "universes": [
+    {
+      "name": "The Matrix",
+      "capacity": 12,
+      "overflowPolicy": [
+        "diegetic-expansion",
+        "thematic-promotion",
+        "structural-mirroring"
+      ]
+    }
+  ]
+}

@@ -1,16 +1,11 @@
-# Project Context
+# Ralph History
 
-- **Project:** SquadScout
-- **Created:** 2026-03-24
+## Day 1 Context
 
-## Core Context
-
-Agent Ralph initialized and ready for work.
-
-## Recent Updates
-
-📌 Team initialized on 2026-03-24
+- User: Ryan Graham
+- Project: A remote-operation Copilot system with a broker, mobile app, cloud relay, and reconnect-sensitive state.
+- Team duty: watch for assigned work, review status, and keep the board moving once the team starts executing.
+- Initial note: no issue source is connected yet.
 
 ## Learnings
 
-Initial setup complete.

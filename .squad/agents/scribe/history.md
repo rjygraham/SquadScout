@@ -1,16 +1,11 @@
-# Project Context
+# Scribe History
 
-- **Project:** SquadScout
-- **Created:** 2026-03-24
+## Day 1 Context
 
-## Core Context
-
-Agent Scribe initialized and ready for work.
-
-## Recent Updates
-
-📌 Team initialized on 2026-03-24
+- User: Ryan Graham
+- Team: Neo, Trinity, Link, Seraph, Morpheus, Switch, Scribe, and Ralph.
+- Project: A remote Copilot PTY wrapper with a local .NET broker, Azure-backed realtime transport, and a .NET MAUI client.
+- Key duties: preserve the decision log, record orchestration activity, and keep cross-agent context synchronized.
 
 ## Learnings
 
-Initial setup complete.

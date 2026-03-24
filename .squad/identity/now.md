@@ -1,9 +1,10 @@
----
-updated_at: 2026-03-24T15:25:18.773Z
-focus_area: Initial setup
-active_issues: []
----
+# Current Focus
 
-# What We're Focused On
+The squad has just been hired for this repository.
 
-Getting started. Updated by coordinator at session start.
+Immediate focus:
+
+- Design the local .NET broker and Copilot PTY wrapper architecture.
+- Define the MAUI-to-broker session lifecycle.
+- Decide whether Orleans should be used for durable state and replay support.
+

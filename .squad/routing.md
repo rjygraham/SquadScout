@@ -1,39 +1,27 @@
-# Work Routing
+# Routing
 
-How to decide who handles what.
+## Default Routes
 
-## Routing Table
+- Architecture, decomposition, cross-cutting tradeoffs, and reviewer gates -> Neo
+- .NET MAUI app work, mobile UX, session command initiation, and client-side state -> Trinity
+- Local broker host, PTY wrapper behavior, project registration UI, and Copilot process orchestration -> Link
+- Azure Web PubSub, Azure Function integration, Entra auth, and cloud wiring -> Seraph
+- Security reviews, performance analysis, replay safety, resiliency, and threat modeling -> Morpheus
+- Testing strategy, reconnect/replay coverage, regression checks, and reviewer feedback -> Switch
+- Decision merges, session logging, orchestration logging, and shared memory maintenance -> Scribe
+- Backlog monitoring, GitHub issue pickup, PR follow-through, and idle detection -> Ralph
 
-| Work Type | Route To | Examples |
-|-----------|----------|----------|
-| {domain 1} | {Name} | {example tasks} |
-| {domain 2} | {Name} | {example tasks} |
-| {domain 3} | {Name} | {example tasks} |
-| Code review | {Name} | Review PRs, check quality, suggest improvements |
-| Testing | {Name} | Write tests, find edge cases, verify fixes |
-| Scope & priorities | {Name} | What to build next, trade-offs, decisions |
-| Session logging | Scribe | Automatic — never needs routing |
+## Multi-Agent Patterns
 
-## Issue Routing
+- End-to-end session architecture -> Neo + Link + Trinity + Seraph + Morpheus
+- Reconnect and replay design -> Link + Seraph + Morpheus + Switch
+- Broker web UI and persistence -> Link + Trinity + Switch
+- Azure auth flow changes -> Seraph + Morpheus + Switch
+- Orleans evaluation or adoption -> Neo + Link + Morpheus + Switch
 
-| Label | Action | Who |
-|-------|--------|-----|
-| `squad` | Triage: analyze issue, assign `squad:{member}` label | Lead |
-| `squad:{name}` | Pick up issue and complete the work | Named member |
+## Reviewer Defaults
 
-### How Issue Assignment Works
+- Switch reviews implementation changes for coverage and edge cases.
+- Neo reviews architecture-impacting changes and cross-agent proposals.
+- Morpheus may reject security or performance-sensitive work that does not meet resilience needs.
 
-1. When a GitHub issue gets the `squad` label, the **Lead** triages it — analyzing content, assigning the right `squad:{member}` label, and commenting with triage notes.
-2. When a `squad:{member}` label is applied, that member picks up the issue in their next session.
-3. Members can reassign by removing their label and adding another member's label.
-4. The `squad` label is the "inbox" — untriaged issues waiting for Lead review.
-
-## Rules
-
-1. **Eager by default** — spawn all agents who could usefully start work, including anticipatory downstream work.
-2. **Scribe always runs** after substantial work, always as `mode: "background"`. Never blocks.
-3. **Quick facts → coordinator answers directly.** Don't spawn an agent for "what port does the server run on?"
-4. **When two agents could handle it**, pick the one whose domain is the primary concern.
-5. **"Team, ..." → fan-out.** Spawn all relevant agents in parallel as `mode: "background"`.
-6. **Anticipate downstream work.** If a feature is being built, spawn the tester to write test cases from requirements simultaneously.
-7. **Issue-labeled work** — when a `squad:{member}` label is applied to an issue, route to that member. The Lead handles all `squad` (base label) triage.
