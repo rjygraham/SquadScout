@@ -36,3 +36,21 @@
 - **Risk:** GitHub issue dotnet/orleans#8187 (2022, still open) flagged invariant registration bugs in Orleans 7. Source inspection confirms fixed on main for Orleans 10. Smoke test recommended.
 - **Status:** Merged to `.squad/decisions.md`. Ready for Phase 2 implementation team (Link, Seraph, Trinity).
 
+### 2026-03-24 — Unified Workstream Decomposition Delivered
+
+- **Synthesis:** Merged 5 specialist proposals (Link ×5 WS, Trinity ×6, Seraph ×6, Morpheus ×5, Switch ×6) into 14 unified workstreams across 4 phases.
+- **First executable slice:** Days 1–5, zero external dependencies — lock message contract, build mock PTY harness, prove sequence/replay correctness locally, stub MAUI receives messages. Owned by Switch + Morpheus + Link + Trinity.
+- **Critical path identified:** WS-1 (contract) → WS-2 (PTY bridge) → WS-5 (E2E routing) → WS-7 (Orleans) → WS-8 (reconnect).
+- **Key integration insight:** The message envelope contract is the single highest-priority blocker — everything depends on it. Switch and Morpheus co-own it, not any single domain.
+- **Cross-cutting security:** Morpheus's security baseline (WS-6) runs in parallel with Phase 1 datapath work, not deferred to Phase 4. Input sanitization and no-secret logging are Day 1 concerns.
+- **Voice I/O placed in Phase 3:** TTS/STT doesn't depend on Orleans, so it can start once the basic datapath works. Trinity owns both, with Switch providing test harness.
+- **Decomposition pattern:** When specialist proposals overlap (e.g., reconnect touched by Trinity, Morpheus, and Seraph), assign one unified workstream with sub-deliverables per owner rather than creating parallel streams.
+- **Key file:** `.squad/decisions/inbox/neo-workstream-decomposition.md`.
+
+### 2026-03-24 — User Directives & Inbox Consolidation (Accepted)
+
+- **Accepted (all 9):** User directives on MudBlazor, native MAUI chat UX, direct Copilot spawn, shared source contract, single-user+multi-machine design, foreground app, app-level sequencing/replay via Orleans, low concurrent sessions, TTS/STT for accessibility.
+- **Process:** Scribe merged 9 decision inbox entries into new "User Directives" section in decisions.md. Archived 6 specialist workstream proposals. Updated team agent histories.
+- **Impact on decomposition:** Decomposition already incorporates all user directives; no scope changes needed. Ready for Phase 1 team execution.
+- **Status:** All open questions from architecture plan now closed by user directives. Proceeding to implementation.
+

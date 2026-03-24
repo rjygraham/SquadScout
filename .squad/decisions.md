@@ -44,12 +44,27 @@
 - **Rationale:** First-party support, perfect fit for single-silo Phase 2 constraints, zero infrastructure, easy migration path to server DB later.
 - **Risk:** GitHub issue dotnet/orleans#8187 (2022, fixed in Orleans 10 main). Early smoke test with NuGet versions recommended.
 
-## Open Questions
+## User Directives — 2026-03-24
 
-- Terminal rendering strategy in MAUI (SkiaSharp vs. xterm.js via WebView)?
-- Copilot spawn mode (direct vs. inside shell)?
-- Message contract sharing (shared project vs. NuGet package)?
-- Broker lifecycle (foreground app vs. Windows Service / systemd)?
-- Maximum concurrent sessions per broker (benchmarking needed).
-- Broker as service vs. foreground app (Phase 4 decision).
+**From Ryan Graham (via Copilot) — Architecture & Product Direction**
+
+- **Accepted (2026-03-24T16:21:26Z):** Use MudBlazor for the local project-configuration UI.
+- **Accepted (2026-03-24T16:23:31Z):** For MAUI terminal rendering, use native controls with a chat-like interaction model instead of terminal-style rendering (SkiaSharp/xterm.js deferred).
+- **Accepted (2026-03-24T16:27:03Z):** For Copilot spawn mode, start with direct spawn first; optional shell mode later.
+- **Accepted (2026-03-24T16:28:01Z):** For message contract sharing, use a shared source project (SquadScout.Contracts) rather than NuGet package.
+- **Accepted (2026-03-24T16:31:07Z):** Broker user model: start single-user, but design shared Azure infrastructure (Web PubSub, Azure Functions) to support multiple locally hosted brokers on different machines for different users.
+- **Accepted (2026-03-24T16:32:46Z):** Broker hosting mode: start as foreground app; keep option to run as Windows Service / systemd later.
+- **Accepted (2026-03-24T16:47:28Z):** For reliability, rely on app-level sequencing and replay rather than service-tier features. Use Orleans' single-threaded turn-based execution model to enforce atomic, ordered state transitions.
+- **Accepted (2026-03-24T16:48:57Z):** Per-broker concurrency design: keep very low (single-user scope), but allow single user to run multiple concurrent sessions.
+- **Accepted (2026-03-24T16:53:05Z):** MAUI app must support text-to-speech for incoming messages and speech-to-text for outgoing messages to enable on-the-go use (including while driving).
+
+## Open Questions (Superseded by User Directives)
+
+*Closed on 2026-03-24:*
+- ~~Terminal rendering strategy~~ → Native MAUI chat UI (directive accepted)
+- ~~Copilot spawn mode~~ → Direct spawn first (directive accepted)
+- ~~Message contract sharing~~ → Shared source project (directive accepted)
+- ~~Broker lifecycle~~ → Foreground app first (directive accepted)
+- ~~Maximum concurrent sessions~~ → Low, single-user scope (directive accepted)
+- ~~Multi-user support~~ → Deferred; design for scalability (directive accepted)
 

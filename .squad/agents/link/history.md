@@ -9,3 +9,20 @@
 
 ## Learnings
 
+### Workstream Decomposition (2026-03-24)
+
+- **5 sequential workstreams proposed:** Foundation & PTY bridge → Project config → Session lifecycle → Orleans grains (Phase 2) → Observability (Phase 3).
+- **First executable slice:** 2 weeks broker + 1.5 weeks MAUI + 1 week cloud = ~4.5 weeks end-to-end for MVP (start session → spawn Copilot → I/O round-trip).
+- **Key sequencing constraint:** Message contract (envelope schema, sequence semantics) must be locked first; Switch and Morpheus unblock broker WS-1.
+- **In-memory first, Orleans second:** Proves raw PTY ↔ PubSub datapath before grain complexity; migration to Orleans in Phase 2 with feature flag or careful cutover.
+- **PTY buffering risk:** Windows ConPTY vs. POSIX TTY behavior asymmetry; early smoke test recommended, don't assume 500-message buffer is universal.
+- **Single-session per project MVP:** Multi-concurrent sessions deferred; acceptable for Phase 1 foreground app with one MAUI user.
+- **Broker restart = state loss until Phase 2:** In-memory registry is acceptable for development; document as known limitation.
+- **Graceful shutdown scope:** Phase 3 covers SIGTERM/Ctrl+C handlers; service-mode deployment (Windows Service / systemd) deferred to Phase 4.
+
+### User Directives Accepted & Ready for Execution (2026-03-24)
+
+- **WS-2: Broker PTY Bridge ownership assigned.** Includes direct Copilot spawn (no shell), mock PTY harness in first executable slice, ConPTY lifecycle management.
+- **MudBlazor selected** for project configuration UI (WS-3 local web UI scope).
+- **Status:** Scribe consolidated all directives to decisions.md. Team workstreams finalized; ready to proceed with Phase 1 execution.
+
