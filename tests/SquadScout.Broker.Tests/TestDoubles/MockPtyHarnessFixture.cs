@@ -9,12 +9,14 @@ namespace SquadScout.Broker.Tests.TestDoubles;
 public sealed class MockPtyHarnessFixture
 {
     private long _nextMessageId = 1;
+    private readonly PtySessionEnvelopePump _ptyPump;
 
     public MockPtyHarnessFixture(int replayBufferCapacity = SessionSequencingDefaults.ReplayBufferCapacity)
     {
         RelayPublisher = new RecordingRelayPublisher();
         Orchestrator = new InMemorySessionOrchestrator(RelayPublisher, new SessionSequenceValidator(), replayBufferCapacity);
         PtyHost = new MockPtyHost();
+        _ptyPump = new PtySessionEnvelopePump(Orchestrator);
     }
 
     public RecordingRelayPublisher RelayPublisher { get; }
@@ -49,51 +51,7 @@ public sealed class MockPtyHarnessFixture
 
     public async Task PumpAvailableAsync()
     {
-        while (PtySession.TryReadEvent(out var @event))
-        {
-            switch (@event.Kind)
-            {
-                case PtySessionEventKind.Started:
-                    await Orchestrator.RecordBrokerMessageAsync(
-                        Session.SessionId,
-                        CreateBrokerCommand(
-                            SessionMessageType.SessionLifecycle,
-                            new SessionLifecyclePayload
-                            {
-                                State = SessionState.Running,
-                                Reason = "pty-started"
-                            },
-                            @event.TimestampUtc));
-                    break;
-
-                case PtySessionEventKind.Output:
-                    await Orchestrator.RecordBrokerMessageAsync(
-                        Session.SessionId,
-                        CreateBrokerCommand(
-                            SessionMessageType.Output,
-                            new OutputChunkPayload
-                            {
-                                Content = @event.Content ?? string.Empty,
-                                IsError = @event.IsError
-                            },
-                            @event.TimestampUtc));
-                    break;
-
-                case PtySessionEventKind.Exited:
-                    await Orchestrator.RecordBrokerMessageAsync(
-                        Session.SessionId,
-                        CreateBrokerCommand(
-                            SessionMessageType.SessionLifecycle,
-                            new SessionLifecyclePayload
-                            {
-                                State = SessionState.Stopped,
-                                Reason = "pty-exited",
-                                ExitCode = @event.ExitCode
-                            },
-                            @event.TimestampUtc));
-                    break;
-            }
-        }
+        await _ptyPump.PumpAvailableAsync(PtySession);
     }
 
     public MessageEnvelope<ReplayRequestPayload> CreateReplayRequest(long fromSequenceInclusive, int maximumMessages = 100) =>
@@ -113,19 +71,6 @@ public sealed class MockPtyHarnessFixture
                 MaximumMessages = maximumMessages,
                 Reason = ReplayRequestReason.ReconnectResume
             }
-        };
-
-    private BrokerEnvelopeCommand<TPayload> CreateBrokerCommand<TPayload>(
-        SessionMessageType messageType,
-        TPayload payload,
-        DateTimeOffset timestampUtc) =>
-        new()
-        {
-            MessageType = messageType,
-            MessageId = $"broker-{messageType.ToString().ToLowerInvariant()}-{_nextMessageId++}",
-            CorrelationId = "corr-mock-pty",
-            TimestampUtc = timestampUtc,
-            Payload = payload
         };
 
     public static TPayload DeserializePayload<TPayload>(MessageEnvelope<JsonElement> envelope) =>

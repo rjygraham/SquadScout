@@ -2,11 +2,27 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
     <RootNamespace>SquadScout.Broker</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\SquadScout.Contracts\SquadScout.Contracts.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="sch.pty.net" Version="0.3.36-pre" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <Target Name="CopyPtyNetNativeFiles" AfterTargets="Build" Condition="'$(PlatformTarget)' != '' and '$(PlatformTarget)' != 'AnyCPU'">
+    <ItemGroup>
+      <PtyNetNativeFiles Include="$(Pkgsch_pty_net)\build\$(PlatformTarget)\**\*" />
+    </ItemGroup>
+
+    <Copy
+      SourceFiles="@(PtyNetNativeFiles)"
+      DestinationFiles="@(PtyNetNativeFiles->'$(OutDir)%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>
