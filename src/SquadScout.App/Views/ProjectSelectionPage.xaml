@@ -1,0 +1,126 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage
+    x:Class="SquadScout.App.Views.ProjectSelectionPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    Title="Projects">
+
+    <RefreshView
+        Command="{Binding RefreshCommand}"
+        IsRefreshing="{Binding IsRefreshing}">
+        <CollectionView
+            ItemsSource="{Binding Projects}"
+            SelectionMode="Single"
+            SelectedItem="{Binding SelectedProject}">
+            <CollectionView.Header>
+                <VerticalStackLayout Padding="20,24,20,8" Spacing="16">
+                    <VerticalStackLayout Spacing="6">
+                        <Label
+                            FontAttributes="Bold"
+                            FontSize="32"
+                            Text="Project selection" />
+                        <Label
+                            FontSize="16"
+                            Text="{Binding LowConcurrencySummary}" />
+                    </VerticalStackLayout>
+
+                    <Border
+                        Padding="16"
+                        StrokeShape="RoundRectangle 16">
+                        <VerticalStackLayout Spacing="10">
+                            <Label
+                                FontAttributes="Bold"
+                                FontSize="18"
+                                Text="Client composition" />
+                            <Label Text="{Binding EnvironmentSummary}" />
+                            <Label Text="{Binding AuthenticationSummary}" />
+                            <Label
+                                IsVisible="{Binding HasStatus}"
+                                Text="{Binding StatusMessage}" />
+                            <Label
+                                IsVisible="{Binding HasError}"
+                                Text="{Binding ErrorMessage}"
+                                TextColor="IndianRed" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <Border
+                        Padding="16"
+                        StrokeShape="RoundRectangle 16"
+                        IsVisible="{Binding HasActiveSession}">
+                        <VerticalStackLayout Spacing="10">
+                            <Label
+                                FontAttributes="Bold"
+                                FontSize="18"
+                                Text="Active session in shell" />
+                            <Label Text="{Binding SessionSummary}" />
+                            <Button
+                                Command="{Binding ResumeActiveSessionCommand}"
+                                Text="Resume active session" />
+                        </VerticalStackLayout>
+                    </Border>
+                </VerticalStackLayout>
+            </CollectionView.Header>
+
+            <CollectionView.EmptyView>
+                <VerticalStackLayout Padding="20,0,20,0" Spacing="12">
+                    <Label
+                        FontAttributes="Bold"
+                        FontSize="18"
+                        Text="No projects loaded" />
+                    <Label Text="Start the local broker or rely on the configured development seeds." />
+                </VerticalStackLayout>
+            </CollectionView.EmptyView>
+
+            <CollectionView.ItemTemplate>
+                <DataTemplate>
+                    <Border
+                        Margin="20,0,20,12"
+                        Padding="16"
+                        StrokeShape="RoundRectangle 16">
+                        <VerticalStackLayout Spacing="6">
+                            <Label
+                                FontAttributes="Bold"
+                                FontSize="18"
+                                Text="{Binding DisplayName}" />
+                            <Label
+                                FontSize="12"
+                                Text="{Binding ProjectId}"
+                                TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray300}}" />
+                            <Label
+                                FontSize="12"
+                                LineBreakMode="CharacterWrap"
+                                Text="{Binding RepositoryRoot}" />
+                        </VerticalStackLayout>
+                    </Border>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+
+            <CollectionView.Footer>
+                <VerticalStackLayout Padding="20,4,20,32" Spacing="16">
+                    <Border
+                        Padding="16"
+                        StrokeShape="RoundRectangle 16">
+                        <VerticalStackLayout Spacing="12">
+                            <Label
+                                FontAttributes="Bold"
+                                FontSize="18"
+                                Text="Session initiation scaffold" />
+                            <Label Text="Requested by" />
+                            <Entry
+                                Placeholder="mobile-user"
+                                Text="{Binding RequestedBy}" />
+                            <Label Text="Command arguments" />
+                            <Entry
+                                Placeholder="--continue --project src\SquadScout.App"
+                                Text="{Binding CommandArguments}" />
+                            <Button
+                                Command="{Binding StartSessionCommand}"
+                                Text="Start pending session" />
+                        </VerticalStackLayout>
+                    </Border>
+                </VerticalStackLayout>
+            </CollectionView.Footer>
+        </CollectionView>
+    </RefreshView>
+</ContentPage>

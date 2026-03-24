@@ -71,4 +71,9 @@
 		<ProjectReference Include="..\SquadScout.Contracts\SquadScout.Contracts.csproj" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<EmbeddedResource Include="appsettings.json" LogicalName="SquadScout.App.appsettings.json" />
+		<EmbeddedResource Include="appsettings.Development.json" LogicalName="SquadScout.App.appsettings.Development.json" />
+	</ItemGroup>
+
 </Project>

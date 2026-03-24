@@ -1,0 +1,108 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage
+    x:Class="SquadScout.App.Views.ActiveSessionPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    Title="Active session">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="20,24,20,32" Spacing="16">
+            <VerticalStackLayout Spacing="6">
+                <Label
+                    FontAttributes="Bold"
+                    FontSize="32"
+                    Text="Active session" />
+                <Label Text="{Binding TranscriptPlaceholder}" />
+            </VerticalStackLayout>
+
+            <Border
+                Padding="16"
+                StrokeShape="RoundRectangle 16">
+                <VerticalStackLayout Spacing="10">
+                    <Label
+                        FontAttributes="Bold"
+                        FontSize="18"
+                        Text="Shell state" />
+                    <Label Text="{Binding SessionSummary}" />
+                    <Label Text="{Binding EnvironmentSummary}" />
+                    <Label Text="{Binding AuthenticationSummary}" />
+                    <Label Text="{Binding MessagingSummary}" />
+                    <Label
+                        IsVisible="{Binding HasError}"
+                        Text="{Binding ErrorMessage}"
+                        TextColor="IndianRed" />
+                </VerticalStackLayout>
+            </Border>
+
+            <Border
+                Padding="16"
+                StrokeShape="RoundRectangle 16">
+                <Grid
+                    ColumnDefinitions="Auto,*"
+                    RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                    ColumnSpacing="12"
+                    RowSpacing="10">
+                    <Label Text="Project" />
+                    <Label
+                        Grid.Column="1"
+                        Text="{Binding ProjectName}" />
+
+                    <Label
+                        Grid.Row="1"
+                        Text="Root" />
+                    <Label
+                        Grid.Row="1"
+                        Grid.Column="1"
+                        LineBreakMode="CharacterWrap"
+                        Text="{Binding ProjectRoot}" />
+
+                    <Label
+                        Grid.Row="2"
+                        Text="Session" />
+                    <Label
+                        Grid.Row="2"
+                        Grid.Column="1"
+                        LineBreakMode="CharacterWrap"
+                        Text="{Binding SessionId}" />
+
+                    <Label
+                        Grid.Row="3"
+                        Text="State" />
+                    <Label
+                        Grid.Row="3"
+                        Grid.Column="1"
+                        Text="{Binding SessionState}" />
+
+                    <Label
+                        Grid.Row="4"
+                        Text="Started" />
+                    <Label
+                        Grid.Row="4"
+                        Grid.Column="1"
+                        Text="{Binding StartedAt}" />
+                </Grid>
+            </Border>
+
+            <Border
+                Padding="16"
+                StrokeShape="RoundRectangle 16">
+                <VerticalStackLayout Spacing="10">
+                    <Label
+                        FontAttributes="Bold"
+                        FontSize="18"
+                        Text="Source and navigation" />
+                    <Label Text="{Binding SourceSummary}" />
+                    <Button
+                        Command="{Binding RefreshStatusCommand}"
+                        Text="Refresh broker state" />
+                    <Button
+                        Command="{Binding ReturnToProjectsCommand}"
+                        Text="Back to projects" />
+                    <Button
+                        Command="{Binding ClearLocalShellContextCommand}"
+                        Text="Clear shell context" />
+                </VerticalStackLayout>
+            </Border>
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>
