@@ -25,7 +25,15 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
     public Task<SessionDescriptor?> GetAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         _sessions.TryGetValue(sessionId, out var session);
-        return Task.FromResult(session?.Descriptor);
+        if (session is null)
+        {
+            return Task.FromResult<SessionDescriptor?>(null);
+        }
+
+        lock (session.SyncRoot)
+        {
+            return Task.FromResult<SessionDescriptor?>(session.Descriptor);
+        }
     }
 
     public async Task<SessionDescriptor> StartAsync(StartSessionCommand command, CancellationToken cancellationToken = default)
@@ -57,10 +65,13 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
         cancellationToken.ThrowIfCancellationRequested();
 
         var state = GetRequiredSessionState(sessionId);
+        MessageEnvelope<TPayload> envelope;
         lock (state.SyncRoot)
         {
-            return Task.FromResult(state.CreateBrokerEnvelope(command));
+            envelope = state.CreateBrokerEnvelope(command);
         }
+
+        return PublishBrokerEnvelopeAsync(envelope, cancellationToken);
     }
 
     public Task<SequenceValidationResult> ValidateClientMessageAsync<TPayload>(
@@ -151,5 +162,13 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
         {
             throw new ArgumentException("Envelope project id does not match the targeted session.", nameof(envelope));
         }
+    }
+
+    private async Task<MessageEnvelope<TPayload>> PublishBrokerEnvelopeAsync<TPayload>(
+        MessageEnvelope<TPayload> envelope,
+        CancellationToken cancellationToken)
+    {
+        await _relayPublisher.PublishEnvelopeAsync(envelope, cancellationToken);
+        return envelope;
     }
 }

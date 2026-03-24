@@ -109,5 +109,13 @@
 - **Decision gates merged:** Replay buffer scope, overflow behavior, generation reset boundary, trust-boundary enforcement all documented in `.squad/decisions.md`
 - **Next:** Incorporate Switch's remaining high-risk coverage before signoff; merge to unblock Phase 2 grain implementation
 
+### Issue #4 Mock PTY Harness (2026-03-25)
+
+- **Reusable PTY seam:** Phase 1 now has a broker-local PTY abstraction under `src\SquadScout.Broker\Pty\` with `IPtyHost`, `IPtySession`, `PtySessionStartRequest`, and `PtySessionEvent`. The seam stays lifecycle/stream oriented so issue #5 can swap in a real Copilot host without replay refactoring.
+- **Deterministic harness pattern:** `MockPtySession` uses logical ticks plus explicit `ReleaseNext()` / `AdvanceBy()` controls instead of wall-clock sleeps. That keeps chunking, exit injection, and cancellation coverage stable in CI and fast locally.
+- **Relay/test fixture pattern:** `tests\SquadScout.Broker.Tests\TestDoubles\MockPtyHarnessFixture.cs` pumps PTY lifecycle/output events through `InMemorySessionOrchestrator` and `RecordingRelayPublisher` so tests can assert sequencing, relay publication order, replay windows, and session state transitions in one offline slice.
+- **Contract additions:** Typed payloads for `Input`, `Output`, and `SessionLifecycle` now live in `src\SquadScout.Contracts\Messages\`. `SessionRuntimeState` updates `SessionDescriptor.State` from `SessionLifecyclePayload`, and `IRelayPublisher` can now capture broker envelopes via `PublishEnvelopeAsync`.
+- **Verification:** `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` both pass with 28/28 tests, including the new `MockPtySessionTests` and `MockPtyHarnessIntegrationTests`.
+
 
 
