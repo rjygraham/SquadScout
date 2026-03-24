@@ -52,4 +52,9 @@ public sealed record MessageEnvelope<TPayload>
     public string? CausationId { get; init; }
 
     public TPayload Payload { get; init; } = default!;
+
+    public override string ToString() =>
+        $"MessageEnvelope<{typeof(TPayload).Name}> {{ ContractVersion = {ContractVersion}, ProjectId = {ProjectId}, SessionId = {SessionId}, Generation = {Generation}, MessageType = {MessageType}, Direction = {Direction}, Sequence = {FormatNullable(Sequence)}, ClientSequence = {FormatNullable(ClientSequence)}, AcknowledgedSequence = {FormatNullable(AcknowledgedSequence)}, TimestampUtc = {TimestampUtc:O}, MessageId = {MessageId}, CorrelationId = {CorrelationId}, CausationId = {CausationId ?? "<none>"}, PayloadType = {typeof(TPayload).Name} }}";
+
+    private static string FormatNullable(long? value) => value?.ToString() ?? "<none>";
 }

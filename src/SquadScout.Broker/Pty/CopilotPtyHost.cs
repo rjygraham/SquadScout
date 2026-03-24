@@ -68,6 +68,7 @@ public sealed class CopilotPtyHost : IPtyHost
                 request,
                 connection,
                 Math.Max(1, _options.OutputBufferSize),
+                Math.Max(1, _options.MaxInputCharactersPerWrite),
                 _loggerFactory.CreateLogger<CopilotPtySession>());
         }
         catch (OperationCanceledException)
