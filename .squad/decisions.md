@@ -127,6 +127,91 @@
 - **Full backlog:** `.squad/decisions/inbox/neo-ordered-backlog.md` (34 items with done-when criteria, dependency graph)
 - **Derived from:** Unified Workstream Decomposition (2026-03-24) + all accepted user directives
 
+## Morpheus Formal Review — Issue #2 / PR #36 (2026-03-25)
+
+**Verdict:** REJECTED
+
+### Build & Test Status
+
+- `dotnet build .\SquadScout.slnx -nologo` ✓ pass
+- `dotnet test .\SquadScout.slnx -nologo --no-build` ✓ pass
+- Commit: `b4efdab`
+- Branch: `squad/2-message-envelope-contract`
+
+### Resolved Issues from Prior Pass
+
+- ✓ Heartbeat payloads no longer duplicate acknowledgement state
+- ✓ Replay responses now advertise available replay window and explicit gap detection
+
+### Remaining Critical Blockers
+
+1. **Sequence ownership undefined**
+   - `MessageEnvelope.cs` exposes one `Sequence` field for both `ClientToBroker` and `BrokerToClient` traffic
+   - Contract does not clarify replay ordering scope: broker-owned only, direction-scoped, or shared
+   - `MessageEnvelopeContractTests.cs` models `ClientToBroker` replay request with `Sequence = 120`, keeping ambiguity alive
+   - **Risk:** Client-authored frames may be treated as part of broker replay stream
+   - **Fix required:** Either reserve `Sequence` for broker-assigned replayable frames (make client sequencing separate/nullable), or add distinct client/server sequence fields with documented semantics
+
+2. **Replay reset boundaries unsafe**
+   - `MessageEnvelope.cs` and `ReplayResponsePayload.cs` have no generation/epoch marker
+   - Replay responses expose overflow window metadata (`AvailableFromSequence`, `AvailableToSequence`, `GapDetected`) but cannot signal ordered-state reset after broker/PTY restart
+   - **Risk:** Reconnecting client cannot distinguish resumed state from fresh stream
+   - **Fix required:** Add session generation/epoch field to contract, or explicitly codify that ordered-state resets must mint brand-new `SessionId`
+
+### Review Paths
+
+- `src\SquadScout.Contracts\Messages\MessageEnvelope.cs`
+- `src\SquadScout.Contracts\Messages\ReplayResponsePayload.cs`
+- `tests\SquadScout.Broker.Tests\MessageEnvelopeContractTests.cs`
+
+### Revision Ownership
+
+- **Recommended next owner:** Link (Switch to sit out correction cycle)
+- **Morpheus:** Will re-review replay semantics before merge approval
+
+### Impact
+
+- Blocks Phase 2 grain activation and replay buffer implementation
+- Message envelope is critical path for issue #3 (Sequence Validator) and phase gates
+
+## Message Envelope Contract Implementation — 2026-03-25
+
+**From Morpheus & Switch parallel execution (2026-03-25)**
+
+### Security & Performance Risk Pass (Morpheus)
+
+**Identified replay-safety blockers:**
+
+- **Sequence ownership undefined:** `Sequence` and `AcknowledgedSequence` appear on every envelope, but server authority is not established.
+- **Duplicate ack state:** `HeartbeatPayload` carries `LastSequenceSeen` and `LastAcknowledgedSequence`, creating two possible sources of truth alongside top-level fields.
+- **Missing replay metadata:** `ReplayResponsePayload` lacks `availableFromSequence`, `availableToSequence`, and gap/lost-range details, so overflow cannot be surfaced safely.
+- **No generation marker:** No explicit contract rule that reconnect state reset issues a fresh `sessionId`, making replay scope ambiguous.
+- **Liveness/recovery coupling:** Heartbeat conflates `ReplayRequested` flag with ack state without explicit boundary rules or challenge/proof fields for spoof-resistance.
+
+**Morpheus checklist for signoff (8 critical invariants):**
+
+1. Define server-assigned, per-session ordering domain for replayable broker → client frames
+2. State whether ordering key is `{sessionId, sequence}` or `{sessionId, generation, sequence}`
+3. Make sequence strictly increasing and gap-free on happy path; duplicates must be detectable
+4. Give every envelope stable message id, contract version, project id, session id, message kind, direction, server timestamp (UTC), and correlation id
+5. Keep timestamps diagnostic only; sequence wins for ordering
+6. Make acknowledgements cumulative and idempotent (`ackUpToSequence` / highest contiguous seen)
+7. Decide whether heartbeat is the ack carrier or whether ack has its own control frame
+8. Define replay as explicit request/response contract with available range metadata and overflow/gap signaling
+
+### Contract Implementation (Switch)
+
+**Chosen shape:** `MessageEnvelope<TPayload>` in `src\SquadScout.Contracts\Messages\` with shared JSON settings in `SessionMessageSerializer.DefaultOptions` (camelCase + string-enum wire format).
+
+**Key decisions:**
+
+- Acknowledgement remains top-level `AcknowledgedSequence` (single source of truth)
+- Heartbeat payloads carry only liveness metadata (`ReplayRequested`, `ExpectedIntervalSeconds`, `SenderInstanceId`) to avoid duplicate ack state
+- Replay responses explicitly publish requested range and available window (`AvailableFromSequence`, `AvailableToSequence`, `GapDetected`) so reconnect overflow is explicit
+- Backward compatibility rule for contract version 1: additive optional members and new message types allowed; renames, removals, or sequence/ack semantic changes require major version bump
+
+**Status:** Implementation complete (commit b4efdab), draft PR #36 opened (closes #2), all tests passing. Awaiting Morpheus review feedback incorporation before final signoff.
+
 ## GitHub Issues Import — 2026-03-24
 
 **From Neo's GitHub backlog export (2026-03-24)**

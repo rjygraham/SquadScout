@@ -52,4 +52,36 @@
 - **Gate responsibilities:** Switch owns #16 (Phase 1→2 gate) and #24 (Phase 2→3 gate). These issues require all dependent workstreams to pass before proceeding.
 - **Status:** All team histories updated. Ready for test strategy kickoff and Phase 1 test harness creation.
 
+### Issue #2 Message Envelope Contract (2026-03-25)
+
+- **Shared contract path:** Session envelope types now live under `src\SquadScout.Contracts\Messages\` and use `SessionMessageSerializer.DefaultOptions` for stable camelCase + string-enum JSON across components.
+- **Replay safety pattern:** `ReplayResponsePayload` exposes requested range, available replay window, and `GapDetected` so reconnect failures can surface overflow explicitly instead of corrupting transcript state silently.
+- **Single source of truth:** Sequence acknowledgements stay on `MessageEnvelope<TPayload>.AcknowledgedSequence`; heartbeat payloads carry only liveness metadata to avoid duplicate ack state.
+- **Contract coverage:** Representative wire-contract tests live in `tests\SquadScout.Broker.Tests\MessageEnvelopeContractTests.cs`, including serialization shape, replay snapshot shape, and optional-field deserialization for backward-compatible additions.
+
+### Issue #2 Contract Batch Parallel Execution (2026-03-25)
+
+**Switch outcome (implementation + test):**
+- Implemented `MessageEnvelope<TPayload>` generic shape with acknowledgement as single source of truth
+- Established shared JSON serialization (camelCase + string-enum) in `SessionMessageSerializer.DefaultOptions`
+- Replay responses explicitly surface available window and gap detection (`AvailableFromSequence`, `AvailableToSequence`, `GapDetected`)
+- Backward compatibility rule locked for contract v1: additive optional members allowed; renames/removals/semantic changes require major version bump
+- Committed as b4efdab, opened draft PR #36 (closes #2)
+- All tests pass; solution builds cleanly
+- **Awaiting:** Morpheus review feedback from comprehensive risk pass (8-point checklist + 7 ambiguities in `.squad/decisions.md`)
+- Next: Incorporate blocker resolutions before final reviewer signoff
+
+### Formal Review Outcome — Issue #2 / PR #36 (2026-03-25T18:43:27Z)
+
+**REJECTED by Morpheus.** Build & test pass confirmed; ack duplication and gap reporting resolved. Two critical semantic blockers prevent merge:
+
+1. **Sequence ownership undefined:** Single `Sequence` field for both directions; contract does not reserve replay domain for broker-only or clarify direction scope. Risks client frames in replay buffer.
+2. **Replay reset boundary missing:** No generation/epoch marker. Reconnecting client cannot distinguish resumed state from fresh stream after broker/PTY restart.
+
+**Revision assignment:** Link owns next iteration; Switch locked out for this cycle. Morpheus will re-review before merge.
+
+**Patterns to preserve:** Single-source-of-truth acknowledgement (top-level only), heartbeat liveness-only separation. These resolved correctly and should not regress.
+
+**Impact:** Blocks Phase 2 grain activation and replay buffer. Message envelope is critical path; decision gate remains locked until both blockers resolved.
+
 
