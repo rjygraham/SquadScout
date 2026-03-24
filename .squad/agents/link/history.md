@@ -67,3 +67,28 @@
 - **Review context:** Switch verified build, focused broker tests (12/12), and full suite (20/20) all pass. No implementation bugs found. Rejection is purely coverage-driven per Switch charter.
 - **Next step:** Incorporate coverage gaps and request re-review from Switch or assigned reviewer before proceeding to Phase 2 grain activation.
 
+### Issue #5 CopilotPtyHost Completion (2026-03-25)
+
+- **Real PTY host landed:** `src\SquadScout.Broker\Pty\CopilotPtyHost.cs` now binds direct-spawn Copilot PTY startup behind `IPtyHost`, with config in `src\SquadScout.Broker\Configuration\CopilotPtyHostOptions.cs` and DI/appsettings wiring in `src\SquadScout.Broker\Program.cs` / `src\SquadScout.Broker\appsettings.json`.
+- **Event seam preserved:** `CopilotPtySession` stays on the issue #4 contract and emits only `PtySessionEvent.Started`, `Output`, and `Exited`; `src\SquadScout.Broker\Pty\PtySessionEnvelopePump.cs` remains the broker-owned translation point into sequenced envelopes.
+- **Critical lifecycle pattern:** Natural process exit must wait for PTY output drain before publishing `Exited`, otherwise final buffered output can be truncated. Forced termination still reports `Exited(null)`, but only when termination was already requested at the moment process exit is observed.
+- **Native dependency packaging:** Broker and broker tests both copy the `sch.pty.net` native files after build via `PlatformTarget=x64`, keeping real PTY tests runnable from the solution build output.
+- **Proof path:** `tests\SquadScout.Broker.Tests\CopilotPtyHostTests.cs` now covers direct spawn success, startup failure surfacing, pre-start cancellation, idempotent teardown, exit-code reporting, chunked output streaming, and real PTY-to-envelope pumping without introducing shell mode.
+- **Validation:** `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` both pass on this workspace after the PTY lifecycle fix.
+
+### Issue #5 Completion — CopilotPtyHost Direct Spawn (2026-03-24T21:36:52Z)
+
+- **Mission:** Implement Copilot PTY host using Pty.Net, preserving the PTY seam established in issue #4, with comprehensive failure-mode and lifecycle coverage.
+- **Deliverables created:**
+  1. `src\SquadScout.Broker\Configuration\CopilotPtyHostOptions.cs` — Dependency injection config for Copilot path and working directory
+  2. `src\SquadScout.Broker\Pty\CopilotPtyHost.cs` — Pty.Net-backed host implementing `IPtyHost` contract
+  3. `src\SquadScout.Broker\Pty\CopilotPtySession.cs` — Session lifecycle: startup, output streaming, cancellation, graceful/forced termination, exit code handling
+  4. `src\SquadScout.Broker\Pty\PtySessionEnvelopePump.cs` — Translates PTY events (`Started`, `Output`, `Exited`) into broker `SessionLifecycle` and `OutputChunk` envelopes
+  5. `src\SquadScout.Broker\Pty\PtySessionStartException.cs` — Startup failure semantics with diagnostics
+  6. `tests\SquadScout.Broker.Tests\CopilotPtyHostTests.cs` — Comprehensive test coverage: happy path (real processes, chunking), failure modes (missing binary), cancellation safety, idempotency, integration envelope pump
+- **Dependencies updated:** Added `Pty.Net` to broker csproj; updated appsettings.json with Copilot paths; registered in DI container
+- **Test harness updated:** `tests\SquadScout.Broker.Tests\TestDoubles\MockPtyHarnessFixture.cs` now binds real PTY for integration validation while mock remains available
+- **Seam preservation:** Direct spawn only (shell mode deferred per acceptance checklist), IPtyHost/IPtySession contracts unchanged, drop-in substitutable for MockPtyHost
+- **Acceptance review:** Switch verified all 7 checklist items, confirmed no shell-path creep, confirmed output compatibility with relay layer
+- **Verdict:** APPROVED for merge; unblocks Issue #6 Broker Relay Pipeline
+

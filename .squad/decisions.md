@@ -321,3 +321,101 @@ Ryan asked Neo to turn the full ordered local backlog into real GitHub issues in
 | #33 | #33 | Diagnostic Harness & Session Export Tooling |
 | #34 | #34 | Security Hardening Sweep & Final Gate |
 
+## Switch — Issue #4 Mock PTY Harness (2026-03-24)
+
+**Owner:** Switch  
+**Branch:** `squad/4-mock-pty-harness`  
+**Requested by:** Ryan Graham
+
+**Decision:** Adopt a two-layer PTY seam:
+
+1. **Broker-facing host contract:** `src\SquadScout.Broker\Pty\IPtyHost.cs` starts PTY sessions from `PtySessionStartRequest`.
+2. **Per-session PTY contract:** `src\SquadScout.Broker\Pty\IPtySession.cs` owns raw writes, event reads, termination, and lifecycle state.
+
+The mock implementation (`MockPtyHost` / `MockPtySession`) stays **event oriented** and emits `PtySessionEvent` values (`Started`, `Output`, `Exited`) with deterministic logical-tick scheduling. It does **not** mint broker envelopes, sequence numbers, replay metadata, or transport concerns.
+
+**Why:** Preserves Link's seam requirement that PTY simulation stay host-shaped and transport-free. Keeps sequencing/replay ownership in `src\SquadScout.Broker\Sessions\`. Gives issue #5 a drop-in contract for the real Copilot PTY host. Gives issue #6 a clean place to translate PTY events into broker envelopes and relay publication.
+
+**Coupled follow-on choices:**
+- `IRelayPublisher` now exposes `PublishEnvelopeAsync<TPayload>` so tests and later relay code can observe broker envelope publication without hiding sequencing inside ad hoc helpers.
+- `SessionRuntimeState` updates `SessionDescriptor.State` when it records `SessionLifecyclePayload`, making running/stopped transitions visible through `ISessionOrchestrator.GetAsync`.
+- Typed payloads now exist for `Input`, `Output`, and `SessionLifecycle` under `src\SquadScout.Contracts\Messages\`.
+
+**Status:** Accepted (merged in #38).
+
+## Switch — Issue #5 CopilotPtyHost Acceptance Bar (2026-03-24)
+
+**Owner:** Switch  
+**Branch:** `squad/5-copilot-pty-host`  
+**Requested by:** Ryan Graham
+
+**Decision:** Reviewer signoff for issue #5 should require a **direct-spawn-only** Copilot PTY host that preserves the existing PTY seam from issue #4:
+
+1. `src\SquadScout.Broker\Pty\IPtyHost.cs` remains the broker-facing start contract.
+2. `src\SquadScout.Broker\Pty\IPtySession.cs` remains the per-session contract for writes, event reads, state, termination, and async disposal.
+3. The real host emits only `PtySessionEvent` values (`Started`, `Output`, `Exited`) so the broker/session layer keeps ownership of sequencing, replay, and relay publication.
+4. Shell mode is **explicitly deferred** and should not appear in the issue #5 implementation or acceptance tests.
+
+**Acceptance checklist:**
+1. Direct spawn lifecycle is explicit (validation, launch, ready event)
+2. Current seam stays intact (substitutable for MockPtyHost)
+3. Output streaming is compatible (ordered Output events)
+4. Startup failures are surfaced cleanly (exceptions not hangs)
+5. Cancellation and teardown are safe (idempotent, no leaks)
+6. Exit semantics are reviewer-readable (graceful, non-zero, forced)
+7. No shell-path creep (tests and implementation direct-spawn only)
+
+**Highest-risk failure modes to cover:**
+- `Started` emitted before PTY/process is usable
+- Startup cancellation leaves a child or PTY handle behind
+- Startup failure swallowed or false `Started` event
+- `TerminateAsync` races with natural exit (duplicate/inconsistent)
+- Real PTY output chunking differs from mock expectations
+- stderr/startup-banner noise dropped or mislabeled
+- Immediate non-zero exit treated as success
+- Shell invocation accidentally slips in
+
+**Status:** Accepted (Link completed, Switch approved).
+
+## Switch — Issue #5 CopilotPtyHost Review (2026-03-24)
+
+**Reviewer:** Switch  
+**Artifact:** `squad/5-copilot-pty-host` (current workspace state)  
+**Scope:** `src\SquadScout.Broker\Pty\*`, `tests\SquadScout.Broker.Tests\CopilotPtyHostTests.cs`  
+
+**Verdict:** APPROVED
+
+The implementation fully satisfies the acceptance bar.
+
+**Strengths:**
+1. **Correct Abstraction:** `CopilotPtyHost` uses `Pty.Net` but hides it completely behind `IPtyHost`, preserving the test seam established in Issue #4.
+2. **Robust Lifecycle:** `CopilotPtySession` handles the complex dance of process exit vs. output stream draining with appropriate timeouts (5s) and forced cleanup.
+3. **Test Coverage:** Happy path confirmed, failure modes (missing binary, pre-start cancellation) tested, idempotency proven, integration envelope pump working.
+
+**Constraints Verified:**
+- No Replay Logic (PTY layer only emits events)
+- Shell Mode deferred
+- Cross-platform (Pty.Net wraps ConPTY/pseudo-terminal)
+
+**Next Steps:** Merge to main. Unblocks Issue #6 Broker Relay Pipeline.
+
+## Link — Issue #5 PTY Exit Semantics (2026-03-24)
+
+**Owner:** Link  
+**Branch:** `squad/5-copilot-pty-host`  
+**Issue:** #5 CopilotPtyHost (Direct Spawn)
+
+**Decision:** For the real PTY host, the broker-visible `Exited` event must be emitted **after** the PTY reader has drained buffered output (or after a bounded forced-cleanup timeout), not immediately when the child process reports exit.
+
+**Why:** ConPTY/process exit can race ahead of the final transcript bytes reaching the broker reader. Publishing `Exited` too early lets the broker stop pumping before the last `Output` chunks arrive, truncating transcript state and replay data. The PTY seam still stays transport-agnostic: the session only emits `Started`, `Output`, and `Exited`; sequencing remains outside the PTY layer.
+
+**Follow-on constraints:**
+1. `TerminateAsync` remains idempotent and produces at most one terminal `Exited` event.
+2. Forced broker termination reports `Exited(null)` only when termination was already requested when process exit was observed.
+3. Natural exits preserve the observed process exit code even if cleanup/drain work continues afterward.
+4. Shell mode stays deferred; this decision applies to the direct-spawn path only.
+
+**Implementation verified in:** `CopilotPtySession.cs`, `CopilotPtyHost.cs`, `CopilotPtyHostTests.cs`
+
+**Status:** Accepted (implemented and approved by Switch).
+

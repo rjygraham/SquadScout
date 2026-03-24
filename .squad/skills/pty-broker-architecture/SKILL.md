@@ -19,12 +19,14 @@ When building a local process that hosts pseudo-terminal child processes and bri
 - **Localhost-only UI:** When the broker has a config UI, bind Kestrel to `127.0.0.1` only. Use Blazor Server for direct grain access without an API layer.
 - **Phase Orleans in after I/O works:** Prove the raw PTY ↔ relay ↔ client datapath first with in-memory state. Add Orleans in a follow-up phase to avoid coupling I/O debugging to grain behavior.
 - **PubSub groups for isolation:** One group per session prevents cross-session message leakage and simplifies routing.
+- **Drain output before exit event:** When the PTY process exits, keep reading until the PTY stream reaches EOF (or a bounded timeout) before publishing the broker-visible exit event. Otherwise the last buffered Copilot output can be lost even though the process already reported an exit code.
 
 ## Examples
 
 - Session grain spawns PTY in `StartAsync`, kills it in `TerminateAsync` and on grain deactivation.
 - Broker heartbeat: grain timer emits `Heartbeat` every 15s; client detects liveness loss after 3 missed beats.
 - Project config as grain state: `IProjectGrain` keyed by projectId, persisted to SQLite via Orleans grain storage.
+- `CopilotPtySession` records the process exit first, drains pending output, then emits one terminal `Exited` event so the relay layer never sees exit before the last transcript chunk.
 
 ## Anti-Patterns
 
@@ -32,3 +34,4 @@ When building a local process that hosts pseudo-terminal child processes and bri
 - Do NOT enable Orleans clustering for a single-machine local broker. `UseLocalhostClustering()` with one silo only.
 - Do NOT expose the broker to the network. All remote communication flows through the cloud relay.
 - Do NOT log PTY content (input/output) — only metadata (message counts, session lifecycle events). Content may contain secrets.
+- Do NOT publish `Exited` as soon as `WaitForExit` completes if the PTY reader can still produce buffered output.

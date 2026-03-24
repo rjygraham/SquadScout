@@ -117,5 +117,54 @@
 - **Contract additions:** Typed payloads for `Input`, `Output`, and `SessionLifecycle` now live in `src\SquadScout.Contracts\Messages\`. `SessionRuntimeState` updates `SessionDescriptor.State` from `SessionLifecyclePayload`, and `IRelayPublisher` can now capture broker envelopes via `PublishEnvelopeAsync`.
 - **Verification:** `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` both pass with 28/28 tests, including the new `MockPtySessionTests` and `MockPtyHarnessIntegrationTests`.
 
+### Issue #5 Acceptance Bar (2026-03-25)
+
+- **Current branch state:** `squad/5-copilot-pty-host` implementation is complete.
+- **Seam to preserve:** The real host must remain a drop-in implementation of `src\SquadScout.Broker\Pty\IPtyHost.cs` / `IPtySession.cs`, emitting only `PtySessionEvent` values (`Started`, `Output`, `Exited`) and keeping broker sequencing/replay ownership out of the PTY layer.
+- **Existing compatibility proof:** `tests\SquadScout.Broker.Tests\TestDoubles\MockPtyHarnessFixture.cs` already proves the broker can translate PTY lifecycle/output events into `SessionLifecyclePayload` and `OutputChunkPayload` via `InMemorySessionOrchestrator`; issue #5 should reuse that event shape rather than inventing a parallel transport.
+- **Reviewer bar:** Signoff must require explicit tests for direct spawn success, startup failure surfacing, pre-start cancellation, deterministic teardown/idempotent termination, exit-code reporting, and chunked output streaming through the current seam. Shell mode remains explicitly deferred and should stay out of implementation and tests for this issue.
+
+### Issue #5 Formal Review — APPROVED (2026-03-25)
+
+- **Artifact:** `squad/5-copilot-pty-host` (current workspace state)
+- **Verdict:** **APPROVED**
+- **Verification:**
+  - `CopilotPtyHost` correctly implements `IPtyHost` using `sch.pty.net`.
+  - `CopilotPtySession` handles lifecycle events (`Started`, `Output`, `Exited`) without bleeding implementation details.
+  - Tests `CopilotPtyHostTests.cs` cover all required scenarios:
+    - Direct spawn (Happy path, exit codes, chunking).
+    - Startup failure (Missing executable).
+    - Pre-start cancellation.
+    - Idempotent termination.
+    - Integration with `PtySessionEnvelopePump`.
+- **Decision:** Ready for merge. Blocks for Issue #6 removed.
+
+### Issue #5 Session Completion Log (2026-03-24T21:36:52Z)
+
+- **Review Context:** Formal review completed 2026-03-25. Artifact: `squad/5-copilot-pty-host` with full CopilotPtyHost implementation, test coverage, and integration proofs.
+- **Reviewer Decision:** **APPROVED** for merge to main.
+- **Acceptance Checklist Verification (7/7):**
+  1. ✓ Direct spawn lifecycle explicit (start request validation, launch, ready event)
+  2. ✓ Current seam intact (IPtyHost/IPtySession contracts unchanged, drop-in substitutable)
+  3. ✓ Output streaming compatible (ordered Output events, OutputChunkPayload translation)
+  4. ✓ Startup failures surfaced cleanly (exceptions for missing binary, bad paths)
+  5. ✓ Cancellation and teardown safe (pre-start cancellation proven, TerminateAsync idempotent)
+  6. ✓ Exit semantics readable (graceful, non-zero, forced termination with correct codes)
+  7. ✓ No shell-path creep (direct spawn only, no shell wrapping, tests confirm constraint)
+- **Highest-Risk Scenarios Covered:**
+  - Started before usable: proven safe with integration tests
+  - Startup cancellation leaks: proven safe, no child process remains
+  - Startup failure swallowed: explicit exception reporting
+  - TerminateAsync race condition: idempotency tested
+  - PTY output chunking: tested against real processes (powershell.exe)
+  - stderr/startup noise: preserved in Output events
+  - Immediate non-zero exit: detected as startup failure, not false success
+  - Shell invocation: deferred, no creep observed
+- **Deliverables approved for merge:**
+  - Configuration: `CopilotPtyHostOptions.cs` (DI config)
+  - Implementation: `CopilotPtyHost.cs`, `CopilotPtySession.cs`, `PtySessionEnvelopePump.cs`, `PtySessionStartException.cs`
+  - Tests: `CopilotPtyHostTests.cs` (comprehensive coverage)
+  - Dependencies: Pty.Net added, broker DI updated, appsettings configured
+- **Phase 1 Unblocked:** This approval unblocks Issue #6 (Broker Relay Pipeline) to proceed with translating real PTY events into relay publication.
 
 
