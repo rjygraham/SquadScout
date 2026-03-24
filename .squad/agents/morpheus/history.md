@@ -63,3 +63,11 @@
 - **Recommendation:** Lock invariants before Issue #3 to prevent semantic divergence across broker, PubSub, and application layers
 - Decision note merged into `.squad/decisions.md` under "Message Envelope Contract Implementation — 2026-03-25"
 - Team history updated with cross-agent learnings
+
+### Issue #3 Sequence Validator & Replay Buffer (2026-03-25)
+
+- `src\SquadScout.Broker\Sessions\` now holds the in-memory reliability core: `SessionSequenceValidator`, `CircularReplayBuffer`, `SessionRuntimeState`, and `InMemorySessionOrchestrator` coordinate broker-owned sequencing, cumulative ack tracking, and generation resets.
+- Replayable broker frames are limited to sequenced `Output` and `SessionLifecycle` messages; heartbeat and replay-control envelopes stay outside the circular buffer so liveness chatter cannot evict transcript data.
+- Replay overflow behavior is explicit: responses always publish `availableFromSequence` / `availableToSequence`, set `gapDetected` when the requested cursor falls behind the buffer head, and paginate deterministically via `maximumMessages`.
+- Ordered-state resets are generation-scoped: `ResetGenerationAsync` clears broker sequence, client sequence, ack state, and replay buffer; stale-generation replay requests return a reset boundary (current generation + available window) instead of cross-generation data.
+- Trust-boundary guard added: broker replay/validation paths now reject envelopes whose `{ projectId, sessionId }` do not match the targeted session state.
