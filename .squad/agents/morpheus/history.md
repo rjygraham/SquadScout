@@ -34,6 +34,25 @@
 - **Current draft blocker:** `src\SquadScout.Contracts\Messages\HeartbeatPayload.cs` duplicates top-level acknowledgement data, so the contract currently has two potential sources of truth for heartbeat/ack state.
 - **Key review paths for issue #2:** `.squad/decisions.md`, `.squad/skills/broker-session-lifecycle/SKILL.md`, `src\SquadScout.Contracts\Messages\`, and `tests\SquadScout.Broker.Tests\MessageEnvelopeContractTests.cs`.
 
+### Formal Review — Issue #2 / PR #36 (2026-03-25)
+
+- **Validation confirmed locally:** `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` both passed on `squad/2-message-envelope-contract` at `b4efdab`.
+- **Replay-safe contract gate:** A shared message envelope is still not merge-safe until it defines who owns `Sequence` for each direction and prevents client-authored frames from entering the broker replay ordering domain by ambiguity.
+- **Ordering identity rule remains mandatory:** Replay metadata must cover overflow *and* ordered-state resets; if `sessionId` can survive a reset, the contract needs an explicit generation marker.
+- **Resolved pattern worth preserving:** Keep cumulative acknowledgement only on the top-level envelope; heartbeat payloads should carry liveness metadata only.
+- **Key review paths:** `src\SquadScout.Contracts\Messages\MessageEnvelope.cs`, `src\SquadScout.Contracts\Messages\ReplayResponsePayload.cs`, and `tests\SquadScout.Broker.Tests\MessageEnvelopeContractTests.cs`.
+
+### Formal Review Outcome — Issue #2 / PR #36 (2026-03-25T18:43:27Z)
+
+**REJECTED.** Build & test pass confirmed. Ack duplication and gap reporting fixed. Two critical blockers remain:
+
+1. **Sequence ownership undefined:** Contract does not distinguish broker-owned replay frames from client-authored traffic; risks client sequences being treated as replay domain input.
+2. **Replay reset boundary unsafe:** No generation/epoch marker; reconnecting client cannot distinguish resumed state from fresh stream after broker/PTY restart.
+
+**Next revision ownership:** Link (Switch sits out correction cycle). Morpheus will re-review replay semantics before merge.
+
+**Impact:** Blocks Phase 2 grain implementation. Message envelope is critical path for issue #3 and phase gates. Recommendation to preserve resolved patterns (single-source-of-truth ack, heartbeat liveness-only separation).
+
 ### Issue #2 Contract Batch Parallel Execution (2026-03-25)
 
 **Morpheus outcome (parallel risk pass):**

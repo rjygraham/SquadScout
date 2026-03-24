@@ -127,6 +127,53 @@
 - **Full backlog:** `.squad/decisions/inbox/neo-ordered-backlog.md` (34 items with done-when criteria, dependency graph)
 - **Derived from:** Unified Workstream Decomposition (2026-03-24) + all accepted user directives
 
+## Morpheus Formal Review — Issue #2 / PR #36 (2026-03-25)
+
+**Verdict:** REJECTED
+
+### Build & Test Status
+
+- `dotnet build .\SquadScout.slnx -nologo` ✓ pass
+- `dotnet test .\SquadScout.slnx -nologo --no-build` ✓ pass
+- Commit: `b4efdab`
+- Branch: `squad/2-message-envelope-contract`
+
+### Resolved Issues from Prior Pass
+
+- ✓ Heartbeat payloads no longer duplicate acknowledgement state
+- ✓ Replay responses now advertise available replay window and explicit gap detection
+
+### Remaining Critical Blockers
+
+1. **Sequence ownership undefined**
+   - `MessageEnvelope.cs` exposes one `Sequence` field for both `ClientToBroker` and `BrokerToClient` traffic
+   - Contract does not clarify replay ordering scope: broker-owned only, direction-scoped, or shared
+   - `MessageEnvelopeContractTests.cs` models `ClientToBroker` replay request with `Sequence = 120`, keeping ambiguity alive
+   - **Risk:** Client-authored frames may be treated as part of broker replay stream
+   - **Fix required:** Either reserve `Sequence` for broker-assigned replayable frames (make client sequencing separate/nullable), or add distinct client/server sequence fields with documented semantics
+
+2. **Replay reset boundaries unsafe**
+   - `MessageEnvelope.cs` and `ReplayResponsePayload.cs` have no generation/epoch marker
+   - Replay responses expose overflow window metadata (`AvailableFromSequence`, `AvailableToSequence`, `GapDetected`) but cannot signal ordered-state reset after broker/PTY restart
+   - **Risk:** Reconnecting client cannot distinguish resumed state from fresh stream
+   - **Fix required:** Add session generation/epoch field to contract, or explicitly codify that ordered-state resets must mint brand-new `SessionId`
+
+### Review Paths
+
+- `src\SquadScout.Contracts\Messages\MessageEnvelope.cs`
+- `src\SquadScout.Contracts\Messages\ReplayResponsePayload.cs`
+- `tests\SquadScout.Broker.Tests\MessageEnvelopeContractTests.cs`
+
+### Revision Ownership
+
+- **Recommended next owner:** Link (Switch to sit out correction cycle)
+- **Morpheus:** Will re-review replay semantics before merge approval
+
+### Impact
+
+- Blocks Phase 2 grain activation and replay buffer implementation
+- Message envelope is critical path for issue #3 (Sequence Validator) and phase gates
+
 ## Message Envelope Contract Implementation — 2026-03-25
 
 **From Morpheus & Switch parallel execution (2026-03-25)**

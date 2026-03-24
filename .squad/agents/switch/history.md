@@ -71,4 +71,17 @@
 - **Awaiting:** Morpheus review feedback from comprehensive risk pass (8-point checklist + 7 ambiguities in `.squad/decisions.md`)
 - Next: Incorporate blocker resolutions before final reviewer signoff
 
+### Formal Review Outcome — Issue #2 / PR #36 (2026-03-25T18:43:27Z)
+
+**REJECTED by Morpheus.** Build & test pass confirmed; ack duplication and gap reporting resolved. Two critical semantic blockers prevent merge:
+
+1. **Sequence ownership undefined:** Single `Sequence` field for both directions; contract does not reserve replay domain for broker-only or clarify direction scope. Risks client frames in replay buffer.
+2. **Replay reset boundary missing:** No generation/epoch marker. Reconnecting client cannot distinguish resumed state from fresh stream after broker/PTY restart.
+
+**Revision assignment:** Link owns next iteration; Switch locked out for this cycle. Morpheus will re-review before merge.
+
+**Patterns to preserve:** Single-source-of-truth acknowledgement (top-level only), heartbeat liveness-only separation. These resolved correctly and should not regress.
+
+**Impact:** Blocks Phase 2 grain activation and replay buffer. Message envelope is critical path; decision gate remains locked until both blockers resolved.
+
 
