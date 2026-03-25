@@ -115,3 +115,11 @@
 - **Local dev bridge:** `src\SquadScout.App\Services\PubSubNegotiationClient.cs` sends localhost development identity headers only when the configured negotiate endpoint is loopback and auth mode is `LocalDevelopment`, so local end-to-end work stays practical without weakening the trusted Easy Auth boundary in cloud mode.
 - **UX surface:** `src\SquadScout.App\ViewModels\ActiveSessionViewModel.cs` and `Views\ActiveSessionPage.xaml` now surface live transport state changes continuously and expose an explicit "Retry live transport" flow when the socket faults.
 - **Validation:** In `D:\GitHub\SquadScout-11`, `dotnet build .\SquadScout.slnx -nologo`, `dotnet test .\tests\SquadScout.App.Tests\SquadScout.App.Tests.csproj -nologo`, and `dotnet test .\SquadScout.slnx -nologo --no-build` all passed (72/72 full-suite after the new app transport coverage landed).
+
+### PR #48 Merge — Squash Landed (2026-03-25)
+
+- **Approval handling:** The final go-ahead came through the requested Switch handoff, while GitHub itself still showed no completed reviews. For this repo's current process, that meant treating the human handoff as the approval source but still rechecking live PR mergeability right before acting.
+- **Merge readiness at execution:** PR #48 still reported clean / mergeable against `main`, and there were no configured GitHub check runs to block or fail the merge path.
+- **Chosen strategy:** Squash merge remained the right fit for a single feature spread across 16 commits and 66 files; it landed the MAUI PubSub client connection service as one tidy `main` change without adding unnecessary reconciliation churn.
+- **Closure verification:** The merge kept `closes #11` effective, and GitHub closed issue #11 as completed immediately after the squash landed.
+- **Workstream status:** Issue #11 is now fully landed on `main`, which closes the Phase 1 MAUI live-transport slice and leaves later reconnect/replay sophistication for follow-on work rather than this merge.
