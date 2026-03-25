@@ -70,3 +70,10 @@
 - **Merge choice when unblocked:** Preferred path is **squash merge** once Switch approves because the branch is 17 commits ahead of `main` and includes a merge-from-main plus squad coordination commits that would create avoidable history noise if preserved.
 - **Issue closure check:** The PR body still contains `closes #10`, so keeping the body intact at merge time will auto-close the transcript UI issue correctly.
 
+### 2026-03-25 — PR #49 Reconciled and Merged
+
+- **Approval handling:** Switch approval arrived as a supplied verdict artifact rather than a GitHub review object, so merge-readiness had to be confirmed from the handoff plus the absence of blocking GitHub review state.
+- **Safe reconciliation pattern:** When adjacent mobile work lands first (`#11` before `#10`), the cleanest merge path is to fold the new transport affordance into the transcript shell instead of reviving the older placeholder cards. For this pass that meant keeping the native transcript UI, adding reconnect to the header actions, and refreshing transcript projection when message-connection status changes.
+- **Validation:** After merging `origin/main` into `squad/10-maui-session-transcript-ui`, the combined branch passed `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` with 76/76 tests green.
+- **Landing result:** PR #49 was squash-merged to `main` as `f61568e`, and issue #10 auto-closed via the preserved `closes #10` directive.
+
