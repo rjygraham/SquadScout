@@ -121,3 +121,11 @@
 - PR squash-merged to main; remote/local issue branch deleted; local checkout fast-forwarded to merged main.
 - Minor non-blocking observations: latent thread-safety inconsistency in MainThread marshaling (safe but worth harmonizing), no dedicated stale-selection warning test (consider follow-up).
 
+### 2026-03-25 — Issue #17 Landing: Telemetry + Phase 1 Gate
+
+- **Context:** Uncommitted working tree contained Issue #17 implementation (SessionTelemetryBuffer, SessionTelemetrySnapshot, instrumented orchestrator) + hardened test coverage across Phase 1 gate, sequence validation, replay, and security baseline. Issue #17 was already closed; reopened to land the work.
+- **Landing strategy:** Created feature/issue-17-session-telemetry-diagnostics branch, committed product/test changes (24 files, 2442 insertions, 134 deletions), pushed to origin, opened PR #57 with "Closes #17". Excluded .squad bookkeeping from product PR; committed separately on main.
+- **Validation:** All 126 tests pass. Gap detection warnings logged as expected for boundary scenarios.
+- **Key learning:** When working tree has completed issue work but issue is already closed, **reopen the issue** rather than create a new one if the scope aligns. The reopening provides clear traceability and respects the original backlog item numbering.
+- **Pattern:** Product/test changes in issue-aligned PRs; .squad bookkeeping commits separately on main. Keeps PR focused and avoids squad metadata churn in code review.
+
