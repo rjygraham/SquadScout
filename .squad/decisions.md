@@ -742,3 +742,34 @@ This keeps the revision cohesive and close to current Aspire ecosystem guidance 
 ## Reviewer Note
 This is close: blocker #2 from the prior rejection is fixed, and the deterministic gate-based test approach is the right pattern. The remaining problem is narrow but still merge-blocking because it reintroduces post-accept stop/input leakage through the stop-failure recovery path.
 
+
+## Seraph — PR #44 Merge Decision (2026-03-25)
+
+**Date:** 2026-03-25  
+**PR:** #44 — squad/13-broker-session-start-stop-endpoints  
+**Owner:** Seraph  
+**Verdict:** EXECUTED / MERGED
+
+### Decision
+
+Reconcile PR #44 by rebasing it onto current main, then squash-merge once GitHub reports the PR clean again.
+
+### Rationale
+
+- GitHub showed mergeable_state: dirty because main had advanced with #45 and #46 after the approved issue #13 fix was prepared.
+- The approved behavior to preserve was the broker stop/start lifecycle hardening, especially the shared stop/input gate and stop-failure recovery serialization.
+- Rebase was the lowest-risk reconciliation because the branch was short, linear, and merged cleanly with the newer broker bootstrap changes already on main.
+- Squash merge kept downstream history tidy and minimized extra merge-noise once the branch had already been rebased onto the latest base.
+
+### Validation Used After Reconciliation
+
+- dotnet build .\SquadScout.slnx -nologo ✅
+- dotnet test .\tests\SquadScout.Broker.Tests\SquadScout.Broker.Tests.csproj -nologo --filter "FullyQualifiedName~SessionRelayPipelineTests" ✅
+- dotnet test .\SquadScout.slnx -nologo --no-build ✅
+
+### Outcome
+
+- PR #44 rebased cleanly onto main
+- Validation passed after reconciliation
+- PR #44 merged successfully
+- Issue #13 closed via the merged PR

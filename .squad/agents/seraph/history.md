@@ -85,3 +85,19 @@
 - **Failure-path invariant tightened:** `src\SquadScout.Broker\Relay\InMemorySessionRelay.cs` now reacquires `StopInputGate` before clearing `_stopRequested` after a `TerminateAsync()` failure, so stop-failure recovery stays serialized with input admission instead of reopening the accepted-stop race mid-recovery.
 - **Deterministic proof extended:** `tests\SquadScout.Broker.Tests\SessionRelayPipelineTests.cs` now covers both the successful stop overlap and a failing-stop overlap, using the gateable PTY harness plus the relay's shared stop gate to prove `session_stop_failed` stays blocked behind recovery before input can resume.
 - **Validation:** In `D:\GitHub\SquadScout-13`, `dotnet build .\SquadScout.slnx -nologo`, `dotnet test .\tests\SquadScout.Broker.Tests\SquadScout.Broker.Tests.csproj -nologo --filter "FullyQualifiedName~SessionRelayPipelineTests"`, and `dotnet test .\SquadScout.slnx -nologo --no-build` all passed (61/61 full-suite).
+
+### PR #44 Merge Reconciliation — Dirty → Clean → Merged (2026-03-25)
+
+- **Dirty cause:** PR #44 was behind `main` after #45 and #46 landed, so GitHub reported `mergeable_state: dirty` even though the approved stop/start behavior itself was still valid.
+- **Chosen merge path:** Rebased `squad/13-broker-session-start-stop-endpoints` onto current `origin/main`, preserving the stop/input gate hardening while absorbing the new Aspire/observability broker bootstrap changes from #46 without reintroducing the race.
+- **Post-reconcile validation:** In `D:\GitHub\SquadScout-13`, `dotnet build .\SquadScout.slnx -nologo`, `dotnet test .\tests\SquadScout.Broker.Tests\SquadScout.Broker.Tests.csproj -nologo --filter "FullyQualifiedName~SessionRelayPipelineTests"`, and `dotnet test .\SquadScout.slnx -nologo --no-build` all passed again (focused broker tests 10/10, full suite 67/67).
+- **Merge outcome:** After force-pushing the rebased branch, GitHub reported PR #44 clean; it was then squash-merged to keep `main` history tidy while retaining the PR body so `closes #13` completed as intended.
+
+### PR #47 Merge-Watch Conditional Activation (2026-03-25T01:22:48Z)
+
+- **Event:** Conditional merge-watch standup for PR #47, awaiting Switch review verdict
+- **Requested by:** Ryan Graham (parallel coordination with Switch)
+- **Trigger:** Switch issues explicit APPROVED verdict
+- **Watch scope (on approval):** Verify mergeable state, execute merge, validate post-merge integration
+- **Escalation:** Cancel standby if Switch issues REJECTED or BLOCKED verdict
+- **Orchestration logs:** 2026-03-25T01-22-48Z-seraph.md
