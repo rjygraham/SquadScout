@@ -107,3 +107,75 @@
 - Documented why the shared defaults project stays multi-targeted for net8.0 and net10.0 so the Azure Functions worker can opt into AddServiceDefaults() while the MAUI app can initialize OpenTelemetry via the MAUI-specific startup hook.
 - Preserved broker compatibility by surfacing the effective ASP.NET Core listen URL in the root status payload while still letting standalone runs honor Broker:ListenUrl.
 - Updated the MAUI app to create broker clients through an Aspire-configured HttpClient factory seam so resilience and future service discovery can flow into mobile-to-broker calls without breaking offline fallbacks.
+### 2026-03-25: Merge Watcher — PR #41 & #42 Monitoring
+
+**Task:** Explicitly watch PR #41 and #42, merge only when clean.
+
+**PR #42 Status:**
+- Title: Implement issue #8 safety baseline
+- State: **MERGED** (2026-03-24T22:28:52Z, beat #41 by ~2 minutes)
+- Merge commit: User (`rjygraham`)
+- Issue #8: Closed
+- Checks: heartbeat SUCCESS ✓
+
+**PR #41 Status (Seraph action):**
+- Title: Implement Azure Function negotiate endpoint
+- State: **OPEN** → **MERGED** (2026-03-24T18:30:09Z)
+- Merge strategy: Create commit merge (single logical commit preserved)
+- Pre-merge checklist:
+  - Merge state: CLEAN ✓
+  - Reviews: 0 (none blocking) ✓
+  - Checks: 0 (no failures) ✓
+  - Comments: 0 (no discussion) ✓
+  - Conflicts: None ✓
+- Key artifact: `src/SquadScout.Cloud/NegotiateFunction.cs` — Azure Function trusted boundary (Easy Auth, managed-identity token minting, session groups, localhost fallback)
+- Issue #7: Auto-closed by PR body
+
+**Outcome:**
+- Both PRs now merged to main
+- WS-2 (Function integration) trusted boundary tier complete
+- WS-3 (PubSub routing) unblocked
+- Merge conflict minimized via early merge before dependent work accumulates
+
+### Issue #9 Handoff — Trinity Implementation Complete (2026-03-24T23:39:21Z)
+
+**Status:** MAUI App Shell Scaffolding complete; PR #43 in review (awaiting Switch gate)
+
+**Context:** Trinity completed issue #9 MAUI app shell scaffolding with cross-platform support and chat-like terminal UI. Build green, 36 tests pass. PR #43 opened; Switch begins formal review.
+
+**Impact on Seraph Workstreams:**
+- WS-3 (PubSub routing): Trinity's MAUI client integration now available to pair with Link's relay pipeline (issue #6).
+- WS-4 (token refresh/reconnect): MAUI session bindings ready to receive negotiated tokens from NegotiateFunction (PR #41 already merged).
+- **No blocking dependencies:** Trinity's implementation uses existing shared Contracts; no new contract changes on issue #9 critical path.
+
+**Next:** Awaiting Switch approval. Once PR #43 merges, MAUI client tier can integrate with broker relay pipeline (issue #6, Link/Seraph parallel work).
+
+### Issue #13 / PR #44 Revision — Stop Failure Gate Hardening (2026-03-25)
+
+- **Failure-path invariant tightened:** `src\SquadScout.Broker\Relay\InMemorySessionRelay.cs` now reacquires `StopInputGate` before clearing `_stopRequested` after a `TerminateAsync()` failure, so stop-failure recovery stays serialized with input admission instead of reopening the accepted-stop race mid-recovery.
+- **Deterministic proof extended:** `tests\SquadScout.Broker.Tests\SessionRelayPipelineTests.cs` now covers both the successful stop overlap and a failing-stop overlap, using the gateable PTY harness plus the relay's shared stop gate to prove `session_stop_failed` stays blocked behind recovery before input can resume.
+- **Validation:** In `D:\GitHub\SquadScout-13`, `dotnet build .\SquadScout.slnx -nologo`, `dotnet test .\tests\SquadScout.Broker.Tests\SquadScout.Broker.Tests.csproj -nologo --filter "FullyQualifiedName~SessionRelayPipelineTests"`, and `dotnet test .\SquadScout.slnx -nologo --no-build` all passed (61/61 full-suite).
+
+### PR #44 Merge Reconciliation — Dirty → Clean → Merged (2026-03-25)
+
+- **Dirty cause:** PR #44 was behind `main` after #45 and #46 landed, so GitHub reported `mergeable_state: dirty` even though the approved stop/start behavior itself was still valid.
+- **Chosen merge path:** Rebased `squad/13-broker-session-start-stop-endpoints` onto current `origin/main`, preserving the stop/input gate hardening while absorbing the new Aspire/observability broker bootstrap changes from #46 without reintroducing the race.
+- **Post-reconcile validation:** In `D:\GitHub\SquadScout-13`, `dotnet build .\SquadScout.slnx -nologo`, `dotnet test .\tests\SquadScout.Broker.Tests\SquadScout.Broker.Tests.csproj -nologo --filter "FullyQualifiedName~SessionRelayPipelineTests"`, and `dotnet test .\SquadScout.slnx -nologo --no-build` all passed again (focused broker tests 10/10, full suite 67/67).
+- **Merge outcome:** After force-pushing the rebased branch, GitHub reported PR #44 clean; it was then squash-merged to keep `main` history tidy while retaining the PR body so `closes #13` completed as intended.
+
+### PR #47 Merge-Watch Conditional Activation (2026-03-25T01:22:48Z)
+
+- **Event:** Conditional merge-watch standup for PR #47, awaiting Switch review verdict
+- **Requested by:** Ryan Graham (parallel coordination with Switch)
+- **Trigger:** Switch issues explicit APPROVED verdict
+- **Watch scope (on approval):** Verify mergeable state, execute merge, validate post-merge integration
+- **Escalation:** Cancel standby if Switch issues REJECTED or BLOCKED verdict
+- **Orchestration logs:** 2026-03-25T01-22-48Z-seraph.md
+
+### Issue #11 — PubSub Client Connection Service (2026-03-25)
+
+- **Worktree baseline sync:** Rebasing `squad/11-pubsub-client-connection-service` onto `origin/main` was necessary before implementation so the branch inherited merged negotiate hardening (#7/#12), MAUI shell work (#9), and Aspire defaults (#46/#47) instead of the older scaffold-only snapshot.
+- **Client transport shape shipped:** `src\SquadScout.App\Services\MessagingConnectionService.cs` now owns negotiate/connect/disconnect/reconnect-attempt flows against Azure Web PubSub using the `json.webpubsub.azure.v1` subprotocol, tracks session-scoped outbound/inbound envelopes, and preserves the negotiated `SessionGroup` contract for later routing work.
+- **Local dev bridge:** `src\SquadScout.App\Services\PubSubNegotiationClient.cs` sends localhost development identity headers only when the configured negotiate endpoint is loopback and auth mode is `LocalDevelopment`, so local end-to-end work stays practical without weakening the trusted Easy Auth boundary in cloud mode.
+- **UX surface:** `src\SquadScout.App\ViewModels\ActiveSessionViewModel.cs` and `Views\ActiveSessionPage.xaml` now surface live transport state changes continuously and expose an explicit "Retry live transport" flow when the socket faults.
+- **Validation:** In `D:\GitHub\SquadScout-11`, `dotnet build .\SquadScout.slnx -nologo`, `dotnet test .\tests\SquadScout.App.Tests\SquadScout.App.Tests.csproj -nologo`, and `dotnet test .\SquadScout.slnx -nologo --no-build` all passed (72/72 full-suite after the new app transport coverage landed).

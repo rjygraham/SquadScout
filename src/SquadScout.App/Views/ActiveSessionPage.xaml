@@ -34,17 +34,28 @@
                             TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray300}}" />
                     </VerticalStackLayout>
 
-                    <HorizontalStackLayout Spacing="10">
+                    <FlexLayout
+                        Direction="Row"
+                        Wrap="Wrap"
+                        AlignItems="Center"
+                        JustifyContent="Start">
+                        <Button
+                            Command="{Binding ReconnectLiveTransportCommand}"
+                            Margin="0,0,10,10"
+                            Text="Reconnect" />
                         <Button
                             Command="{Binding RefreshStatusCommand}"
+                            Margin="0,0,10,10"
                             Text="Refresh" />
                         <Button
                             Command="{Binding ReturnToProjectsCommand}"
+                            Margin="0,0,10,10"
                             Text="Projects" />
                         <Button
                             Command="{Binding ClearLocalShellContextCommand}"
+                            Margin="0,0,10,10"
                             Text="Clear" />
-                    </HorizontalStackLayout>
+                    </FlexLayout>
                 </VerticalStackLayout>
             </Border>
 

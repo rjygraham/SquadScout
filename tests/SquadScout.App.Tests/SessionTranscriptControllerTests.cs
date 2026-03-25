@@ -14,11 +14,13 @@ public sealed class SessionTranscriptControllerTests
 
         var state = controller.Sync(
             CreateSnapshot(SessionState.Pending, SessionActivationSource.Broker),
-            new MessageConnectionStatus(
-                MessageConnectionState.Ready,
-                "Messaging composition is ready for the session.",
-                "squadscout",
-                SupportsLiveSessionStream: false));
+            new MessageConnectionStatus
+            {
+                State = MessageConnectionState.Ready,
+                Summary = "Messaging composition is ready for the session.",
+                Hub = "squadscout",
+                SupportsLiveSessionStream = false
+            });
 
         Assert.True(state.CanCompose);
         Assert.Equal("Transcript ready", state.EmptyTitle);
@@ -38,11 +40,13 @@ public sealed class SessionTranscriptControllerTests
 
         var controller = new SessionTranscriptController(() => times.Dequeue());
         var snapshot = CreateSnapshot(SessionState.Running, SessionActivationSource.Broker);
-        var connectionStatus = new MessageConnectionStatus(
-            MessageConnectionState.Ready,
-            "Preview mode",
-            "squadscout",
-            SupportsLiveSessionStream: false);
+        var connectionStatus = new MessageConnectionStatus
+        {
+            State = MessageConnectionState.Ready,
+            Summary = "Preview mode",
+            Hub = "squadscout",
+            SupportsLiveSessionStream = false
+        };
 
         controller.Sync(snapshot, connectionStatus);
         controller.SendDraft(snapshot, connectionStatus, "Ryan", "First message");
@@ -65,11 +69,13 @@ public sealed class SessionTranscriptControllerTests
         ]);
 
         var controller = new SessionTranscriptController(() => times.Dequeue());
-        var connectionStatus = new MessageConnectionStatus(
-            MessageConnectionState.Ready,
-            "Preview mode",
-            "squadscout",
-            SupportsLiveSessionStream: false);
+        var connectionStatus = new MessageConnectionStatus
+        {
+            State = MessageConnectionState.Ready,
+            Summary = "Preview mode",
+            Hub = "squadscout",
+            SupportsLiveSessionStream = false
+        };
 
         controller.Sync(CreateSnapshot(SessionState.Pending, SessionActivationSource.Broker), connectionStatus);
         var nextState = controller.Sync(CreateSnapshot(SessionState.Running, SessionActivationSource.Broker), connectionStatus);
@@ -84,11 +90,13 @@ public sealed class SessionTranscriptControllerTests
     {
         var controller = new SessionTranscriptController();
         var snapshot = CreateSnapshot(SessionState.Stopped, SessionActivationSource.Broker);
-        var connectionStatus = new MessageConnectionStatus(
-            MessageConnectionState.Ready,
-            "Preview mode",
-            "squadscout",
-            SupportsLiveSessionStream: false);
+        var connectionStatus = new MessageConnectionStatus
+        {
+            State = MessageConnectionState.Ready,
+            Summary = "Preview mode",
+            Hub = "squadscout",
+            SupportsLiveSessionStream = false
+        };
 
         controller.Sync(snapshot, connectionStatus);
         var result = controller.SendDraft(snapshot, connectionStatus, "Ryan", "Should fail");

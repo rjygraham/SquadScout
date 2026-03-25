@@ -57,8 +57,15 @@ public sealed class ActiveSessionViewModel : ViewModelBase
         ReturnToProjectsCommand = new AsyncCommand(ReturnToProjectsAsync, () => !IsBusy);
         ClearLocalShellContextCommand = new AsyncCommand(ClearLocalShellContextAsync, () => HasActiveSession && !IsBusy);
         SendMessageCommand = new AsyncCommand(SendMessageAsync, () => CanSendMessage && !IsBusy);
+        ReconnectLiveTransportCommand = new AsyncCommand(ReconnectLiveTransportAsync, () => HasActiveSession && !IsBusy);
 
         _activeSessionState.Changed += (_, snapshot) => ApplySnapshot(snapshot);
+        _messageConnectionService.StatusChanged += (_, status) =>
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                MessagingSummary = status.Summary;
+                ApplyTranscriptState(_transcriptController.Sync(_activeSessionState.GetSnapshot(), status));
+            });
 
         StatusMessage = "Use the composer below to preview the native transcript workflow.";
         ApplySnapshot(_activeSessionState.GetSnapshot());
@@ -156,6 +163,8 @@ public sealed class ActiveSessionViewModel : ViewModelBase
         get => _projectRoot;
         private set => SetProperty(ref _projectRoot, value);
     }
+
+    public IAsyncCommand ReconnectLiveTransportCommand { get; }
 
     public IAsyncCommand RefreshStatusCommand { get; }
 
@@ -297,6 +306,38 @@ public sealed class ActiveSessionViewModel : ViewModelBase
         ReturnToProjectsCommand.RaiseCanExecuteChanged();
         ClearLocalShellContextCommand.RaiseCanExecuteChanged();
         SendMessageCommand.RaiseCanExecuteChanged();
+        ReconnectLiveTransportCommand.RaiseCanExecuteChanged();
+    }
+
+    private async Task ReconnectLiveTransportAsync()
+    {
+        if (!HasActiveSession)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        RefreshCommands();
+
+        try
+        {
+            var status = await _messageConnectionService.ReconnectAsync();
+            MessagingSummary = status.Summary;
+            StatusMessage = status.Summary;
+            ErrorMessage = status.State == MessageConnectionState.Faulted
+                ? status.FailureReason ?? status.Summary
+                : string.Empty;
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+            RefreshCommands();
+        }
     }
 
     private async Task RefreshStatusAsync()
