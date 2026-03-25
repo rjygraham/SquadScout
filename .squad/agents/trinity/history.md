@@ -57,3 +57,16 @@
 - **Composition points:** Auth, project catalog, messaging, active-session state, and session lifecycle are registered behind app-side interfaces so #10/#21/#27/#28 can extend behavior without reshaping the host.
 - **Local dev stance:** Environment-specific embedded app settings can fall back to seed projects and offline pending sessions in Development when the broker is unavailable, keeping session UX work reviewable before the full datapath is online.
 
+### 2026-03-25 — Issue #10 Transcript UI Delivered
+
+- **Session page shape:** The active-session page now renders as a native transcript surface with status banners, chat-style bubbles, a bottom composer, empty states, and stopped/error handling instead of a shell-state placeholder.
+- **Projection seam:** A pure `SessionTranscriptController` now turns active-session snapshots plus messaging status into transcript view state. That keeps the UI testable today and gives #11 (live PubSub) / #21 (reconnect + replay) a stable extension point.
+- **Interaction polish:** The page keeps a chat-like scroll-to-latest behavior when the user is near the bottom or sends a message, while preserving grouped spacing for consecutive user messages.
+- **Validation:** `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` passed after landing the transcript UI and new app-side tests.
+
+### 2026-03-25 — PR #49 Merge Watch Blocked on Switch Review
+
+- **PR state:** GitHub shows PR #49 mergeable with `mergeable_state: clean`, but there are currently no reviews, no review comments, and no check runs on the head commit, so the approval gate has not been met.
+- **Merge choice when unblocked:** Preferred path is **squash merge** once Switch approves because the branch is 17 commits ahead of `main` and includes a merge-from-main plus squad coordination commits that would create avoidable history noise if preserved.
+- **Issue closure check:** The PR body still contains `closes #10`, so keeping the body intact at merge time will auto-close the transcript UI issue correctly.
+

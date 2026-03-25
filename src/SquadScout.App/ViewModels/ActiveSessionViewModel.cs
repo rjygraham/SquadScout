@@ -12,9 +12,15 @@ public sealed class ActiveSessionViewModel : ViewModelBase
     private readonly IMessageConnectionService _messageConnectionService;
     private readonly IAppNavigator _navigator;
     private readonly ISessionLifecycleService _sessionLifecycleService;
+    private readonly SessionTranscriptController _transcriptController;
 
     private string _authenticationSummary = string.Empty;
     private bool _canRefreshFromBroker;
+    private bool _canComposeMessage;
+    private string _composerPlaceholder = "Start a session to compose messages.";
+    private string _composerText = string.Empty;
+    private string _emptyStateDescription = "Start a session to open the transcript timeline.";
+    private string _emptyStateTitle = "No active session";
     private bool _hasActiveSession;
     private bool _initialized;
     private string _messagingSummary = string.Empty;
@@ -25,6 +31,10 @@ public sealed class ActiveSessionViewModel : ViewModelBase
     private string _sessionSummary = "No active session selected.";
     private string _sourceSummary = "No session source";
     private string _startedAt = "—";
+    private IReadOnlyList<TranscriptBannerState> _statusBanners = Array.Empty<TranscriptBannerState>();
+    private IReadOnlyList<TranscriptMessageState> _transcriptMessages = Array.Empty<TranscriptMessageState>();
+
+    private ClientIdentity? _identity;
 
     public ActiveSessionViewModel(
         AppEnvironment environment,
@@ -36,24 +46,28 @@ public sealed class ActiveSessionViewModel : ViewModelBase
         IAppNavigator navigator)
     {
         EnvironmentSummary = $"{environment.Name} • {brokerApiOptions.BaseUrl}";
-        TranscriptPlaceholder = "Transcript, reconnect, and voice interactions land in #10, #21, #27, and #28.";
-
         _activeSessionState = activeSessionState;
         _sessionLifecycleService = sessionLifecycleService;
         _authenticationService = authenticationService;
         _messageConnectionService = messageConnectionService;
         _navigator = navigator;
+        _transcriptController = new SessionTranscriptController();
 
         RefreshStatusCommand = new AsyncCommand(RefreshStatusAsync, () => HasActiveSession && CanRefreshFromBroker && !IsBusy);
         ReturnToProjectsCommand = new AsyncCommand(ReturnToProjectsAsync, () => !IsBusy);
         ClearLocalShellContextCommand = new AsyncCommand(ClearLocalShellContextAsync, () => HasActiveSession && !IsBusy);
+        SendMessageCommand = new AsyncCommand(SendMessageAsync, () => CanSendMessage && !IsBusy);
         ReconnectLiveTransportCommand = new AsyncCommand(ReconnectLiveTransportAsync, () => HasActiveSession && !IsBusy);
 
         _activeSessionState.Changed += (_, snapshot) => ApplySnapshot(snapshot);
         _messageConnectionService.StatusChanged += (_, status) =>
-            MainThread.BeginInvokeOnMainThread(() => MessagingSummary = status.Summary);
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                MessagingSummary = status.Summary;
+                ApplyTranscriptState(_transcriptController.Sync(_activeSessionState.GetSnapshot(), status));
+            });
 
-        StatusMessage = "Session control will render here once a pending session is active.";
+        StatusMessage = "Use the composer below to preview the native transcript workflow.";
         ApplySnapshot(_activeSessionState.GetSnapshot());
         MessagingSummary = _messageConnectionService.CurrentStatus.Summary;
     }
@@ -76,7 +90,43 @@ public sealed class ActiveSessionViewModel : ViewModelBase
         }
     }
 
+    public bool CanSendMessage
+    {
+        get => _canComposeMessage && !string.IsNullOrWhiteSpace(ComposerText);
+    }
+
     public IAsyncCommand ClearLocalShellContextCommand { get; }
+
+    public string ComposerPlaceholder
+    {
+        get => _composerPlaceholder;
+        private set => SetProperty(ref _composerPlaceholder, value);
+    }
+
+    public string ComposerText
+    {
+        get => _composerText;
+        set
+        {
+            if (SetProperty(ref _composerText, value))
+            {
+                OnPropertyChanged(nameof(CanSendMessage));
+                RefreshCommands();
+            }
+        }
+    }
+
+    public string EmptyStateDescription
+    {
+        get => _emptyStateDescription;
+        private set => SetProperty(ref _emptyStateDescription, value);
+    }
+
+    public string EmptyStateTitle
+    {
+        get => _emptyStateTitle;
+        private set => SetProperty(ref _emptyStateTitle, value);
+    }
 
     public string EnvironmentSummary { get; }
 
@@ -91,6 +141,10 @@ public sealed class ActiveSessionViewModel : ViewModelBase
             }
         }
     }
+
+    public bool HasStatusBanners => StatusBanners.Count > 0;
+
+    public bool HasTranscriptMessages => TranscriptMessages.Count > 0;
 
     public string MessagingSummary
     {
@@ -116,6 +170,8 @@ public sealed class ActiveSessionViewModel : ViewModelBase
 
     public IAsyncCommand ReturnToProjectsCommand { get; }
 
+    public IAsyncCommand SendMessageCommand { get; }
+
     public string SessionId
     {
         get => _sessionId;
@@ -140,25 +196,49 @@ public sealed class ActiveSessionViewModel : ViewModelBase
         private set => SetProperty(ref _sourceSummary, value);
     }
 
+    public IReadOnlyList<TranscriptBannerState> StatusBanners
+    {
+        get => _statusBanners;
+        private set
+        {
+            if (SetProperty(ref _statusBanners, value))
+            {
+                OnPropertyChanged(nameof(HasStatusBanners));
+            }
+        }
+    }
+
     public string StartedAt
     {
         get => _startedAt;
         private set => SetProperty(ref _startedAt, value);
     }
 
-    public string TranscriptPlaceholder { get; }
+    public IReadOnlyList<TranscriptMessageState> TranscriptMessages
+    {
+        get => _transcriptMessages;
+        private set
+        {
+            if (SetProperty(ref _transcriptMessages, value))
+            {
+                OnPropertyChanged(nameof(HasTranscriptMessages));
+            }
+        }
+    }
 
     public async Task InitializeAsync()
     {
         if (!_initialized)
         {
-            var identity = await _authenticationService.GetCurrentIdentityAsync();
-            AuthenticationSummary = $"{identity.DisplayName} • {identity.Mode}";
+            _identity = await _authenticationService.GetCurrentIdentityAsync();
+            AuthenticationSummary = $"{_identity.DisplayName} • {_identity.Mode}";
             _initialized = true;
         }
 
-        ApplySnapshot(_activeSessionState.GetSnapshot());
+        var snapshot = _activeSessionState.GetSnapshot();
+        ApplySnapshot(snapshot);
         MessagingSummary = _messageConnectionService.CurrentStatus.Summary;
+        ApplyTranscriptState(_transcriptController.Sync(snapshot, _messageConnectionService.CurrentStatus));
     }
 
     private void ApplySnapshot(ActiveSessionSnapshot snapshot)
@@ -175,6 +255,7 @@ public sealed class ActiveSessionViewModel : ViewModelBase
             StartedAt = "—";
             SourceSummary = "No session source";
             CanRefreshFromBroker = false;
+            ApplyTranscriptState(_transcriptController.Sync(snapshot, _messageConnectionService.CurrentStatus));
             return;
         }
 
@@ -187,6 +268,7 @@ public sealed class ActiveSessionViewModel : ViewModelBase
             ? "Local development fallback"
             : "Broker-backed shell";
         CanRefreshFromBroker = snapshot.Source == SessionActivationSource.Broker;
+        ApplyTranscriptState(_transcriptController.Sync(snapshot, _messageConnectionService.CurrentStatus));
     }
 
     private async Task ClearLocalShellContextAsync()
@@ -223,6 +305,7 @@ public sealed class ActiveSessionViewModel : ViewModelBase
         RefreshStatusCommand.RaiseCanExecuteChanged();
         ReturnToProjectsCommand.RaiseCanExecuteChanged();
         ClearLocalShellContextCommand.RaiseCanExecuteChanged();
+        SendMessageCommand.RaiseCanExecuteChanged();
         ReconnectLiveTransportCommand.RaiseCanExecuteChanged();
     }
 
@@ -296,6 +379,40 @@ public sealed class ActiveSessionViewModel : ViewModelBase
             IsBusy = false;
             RefreshCommands();
         }
+    }
+
+    private void ApplyTranscriptState(SessionTranscriptViewState viewState)
+    {
+        StatusBanners = viewState.Banners;
+        TranscriptMessages = viewState.Messages;
+        ComposerPlaceholder = viewState.ComposerPlaceholder;
+        EmptyStateTitle = viewState.EmptyTitle;
+        EmptyStateDescription = viewState.EmptyDescription;
+        _canComposeMessage = viewState.CanCompose;
+        OnPropertyChanged(nameof(CanSendMessage));
+        RefreshCommands();
+    }
+
+    private async Task SendMessageAsync()
+    {
+        _identity ??= await _authenticationService.GetCurrentIdentityAsync();
+
+        var result = _transcriptController.SendDraft(
+            _activeSessionState.GetSnapshot(),
+            _messageConnectionService.CurrentStatus,
+            _identity.DisplayName,
+            ComposerText);
+
+        ApplyTranscriptState(result.ViewState);
+        if (!result.Success)
+        {
+            ErrorMessage = result.ErrorMessage;
+            return;
+        }
+
+        ErrorMessage = string.Empty;
+        ComposerText = string.Empty;
+        StatusMessage = result.StatusMessage;
     }
 
     private Task ReturnToProjectsAsync() => _navigator.GoToProjectsAsync();

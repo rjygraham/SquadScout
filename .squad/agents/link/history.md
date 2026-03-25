@@ -110,6 +110,21 @@
 - **Acceptance review:** Switch verified all 7 checklist items, confirmed no shell-path creep, confirmed output compatibility with relay layer
 - **Verdict:** APPROVED for merge; unblocks Issue #6 Broker Relay Pipeline
 
+### Issue #31 Revision — Aspire orchestration + ServiceDefaults (2026-03-25)
+
+- **Shared defaults shape:** `src\SquadScout.ServiceDefaults` now multi-targets `net8.0;net10.0` so the broker, Functions isolated worker, and MAUI app can all share the same OpenTelemetry/logging + HttpClient resilience defaults without forcing Functions off `net8.0`.
+- **Functions hosting seam:** Azure Functions Aspire integration is cleanest when `src\SquadScout.Functions\Program.cs` moves to `FunctionsApplication.CreateBuilder(args)` and calls `builder.AddServiceDefaults()` before the worker is built; that preserves isolated-worker behavior while letting Aspire orchestrate it with `AddAzureFunctionsProject`.
+- **MAUI boundary:** `src\SquadScout.App` participates through ServiceDefaults + `IHttpClientFactory`, while `src\SquadScout.AppHost\AppHost.cs` registers the MAUI app via `AddMauiProject(...).AddWindowsDevice()` instead of trying to treat the mobile app like a hosted backend service.
+- **Broker orchestration detail:** `src\SquadScout.Broker\Program.cs` must only call `UseUrls` when Aspire has not already injected server URLs, otherwise fixed local config overrides AppHost endpoint assignment.
+- **Validation path:** `dotnet build .\SquadScout.slnx -nologo`, `dotnet test .\SquadScout.slnx -nologo --no-build`, and a smoke `dotnet run --project .\src\SquadScout.AppHost\SquadScout.AppHost.csproj --no-build` all succeeded after the Aspire revision.
+
+### PR #46 Merge (2026-03-25T00:30:00Z)
+
+- **Owner:** Link
+- **PR:** rjygraham/SquadScout#46 "Add Aspire orchestration and ServiceDefaults"
+- **Merge status:** ✅ Successfully merged to main using squash strategy
+- **Rationale:** Single logical commit, clean history, minimizes downstream rebase conflicts
+- **Result:** Aspire + ServiceDefaults now integrated into main; unblocks Phase 2 grain activation and multi-project orchestration testing
 ### Issue #6 Broker Relay Pipeline (2026-03-25)
 
 - **Phase 1 relay owner lives above the PTY seam:** `src\SquadScout.Broker\Relay\InMemorySessionRelay.cs` now owns the active PTY session registry, project-root resolution, PTY startup, background envelope pumping, and client-input dispatch so both `MockPtyHost` and `CopilotPtyHost` stay swappable behind `IPtyHost`.

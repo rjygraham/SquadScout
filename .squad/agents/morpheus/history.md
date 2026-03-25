@@ -100,6 +100,83 @@
 
 **Impact:** Issue #3 remains unmerged; Phase 2 grain activation is blocked. No implementation bug found; coverage is the sole blocker. Morpheus is resting during Link's correction iteration.
 
+### Issue #8 / PR #42 Merge Completion (2026-03-24T22:28:52Z)
+
+**MERGED — Squash.** Input Sanitization & Secret-Safe Logging baseline is now on main.
+
+**Pre-merge verification:**
+- Clean merge state, no conflicts, no blockers
+- Build: ✅ (8.6s, all projects)
+- Tests: ✅ (16.1s, all broker tests)
+- Changes: 274 additions, 3 deletions across 11 files
+- Base already ancestor (no rebase needed)
+
+**Merge strategy rationale:**
+- Squash flatten to preserve logical unit (single input-sanitization concern)
+- Reduces main history fragmentation vs. multi-commit merge
+- Minimizes downstream conflict surface for dependent branches
+- Preserves closure semantic: `closes #8` auto-closed the issue on merge
+
+**Outcome:** Issue #8 closed. Phase 1 security baseline (sanitization + secret redaction) unblocks feature teams. No downstream rework needed.
+
+### Issue #9 Handoff — Trinity Implementation Complete (2026-03-24T23:39:21Z)
+
+**Status:** MAUI App Shell Scaffolding complete; PR #43 in review (awaiting Switch gate)
+
+**Trinity Deliverables:**
+- MAUI cross-platform app shell with scaffolds for iOS, macOS Catalyst, Android, Windows
+- Chat-like terminal rendering UI (native MAUI controls per user directive)
+- Session start/stop command bindings
+- Message envelope integration with shared Contracts
+- 36 tests, all passing
+
+**Build & Test Status:**
+- ✅ Full solution compiles
+- ✅ All 36 tests pass
+- ✅ Branch clean, no conflicts
+
+**Next:** Switch formal code review and acceptance gate on PR #43 (closes issue #9). Morpheus observing; no direct blocker on replay/security path from issue #9 unless contract changes emerge during review.
+
+### Issue #12 Token Validation & Session Claims Hardening — Morpheus DELIVERY (2026-03-25T00:20:09Z)
+
+**Status:** Complete. Token validation middleware and session claims hardening integrated; PR #45 opened (closes #12); ready for Switch formal review.
+
+**Morpheus Deliverables:**
+- `TokenValidationMiddleware.cs` — Bearer token extraction, signature validation, expiration enforcement
+- `SessionClaimsValidator.cs` — Session claim verification, project ownership binding, user context validation
+- Claims binding enforcement (project scoping, user context)
+- Broker authentication hardening in session lifecycle
+- Integrated with session state machine
+
+**Build & Test Status:**
+- ✅ Full solution compiles
+- ✅ All tests pass (baseline maintained)
+- ✅ Branch pushed to origin
+- ✅ PR #45 clean, no conflicts
+
+**Handoff:** Token validation is WS-2 critical path. Morpheus now awaits Switch's formal review gate; next revision cycle (if needed) triggers Link as per team protocol for rejection correction.
+
+### Issue #12 / PR #45 Merge Completion (2026-03-25T00:29:26Z)
+
+**MERGED — Squash.** Token validation and session claims hardening baseline is now on main.
+
+**Pre-merge verification:**
+- Clean merge state, no conflicts, no blockers
+- Mergeable state: `clean` ✅
+- Reviews: None (approved via Switch review verdict)
+- Comments: None
+- Check runs: None (CI passed)
+- Changes: 390 additions, 79 deletions across 8 files
+- Single commit (optimal for squash)
+
+**Merge strategy rationale:**
+- Squash flatten to preserve logical unit (single token validation concern)
+- Reduces main history fragmentation vs. multi-commit merge
+- Minimizes downstream conflict surface for dependent branches
+- Preserves closure semantic: `closes #12` auto-closed the issue on merge
+
+**Outcome:** Issue #12 closed. Phase 1 security baseline (token validation + claims hardening) unblocks Phase 2 state machine. WS-2 token validation complete. No downstream rework needed. History and merge decision documented in `.squad/decisions/inbox/morpheus-pr45-merge.md`.
+
 ### Issue #12 Token Validation & Session Claims Hardening (2026-03-25)
 
 - **Easy Auth headers are only trustworthy inside the Azure Function boundary.** Local or non-Azure requests must not be allowed to self-assert `x-ms-client-principal*` headers; use the localhost development identity path instead.

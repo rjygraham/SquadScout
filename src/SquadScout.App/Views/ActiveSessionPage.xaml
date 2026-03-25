@@ -3,109 +3,301 @@
     x:Class="SquadScout.App.Views.ActiveSessionPage"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-    Title="Active session">
+    Title="Session transcript">
 
-    <ScrollView>
-        <VerticalStackLayout Padding="20,24,20,32" Spacing="16">
-            <VerticalStackLayout Spacing="6">
+    <Grid RowDefinitions="Auto,*,Auto">
+        <VerticalStackLayout
+            Grid.Row="0"
+            Padding="20,24,20,12"
+            Spacing="12">
+            <Border
+                Padding="16"
+                StrokeShape="RoundRectangle 20">
+                <VerticalStackLayout Spacing="12">
+                    <VerticalStackLayout Spacing="4">
+                        <Label
+                            FontAttributes="Bold"
+                            FontSize="30"
+                            Text="Session transcript" />
+                        <Label Text="{Binding SessionSummary}" />
+                        <Label
+                            FontSize="12"
+                            Text="{Binding ProjectName, StringFormat='Project: {0}'}"
+                            TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray300}}" />
+                        <Label
+                            FontSize="12"
+                            Text="{Binding SessionId, StringFormat='Session: {0}'}"
+                            TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray300}}" />
+                        <Label
+                            FontSize="12"
+                            Text="{Binding MessagingSummary}"
+                            TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray300}}" />
+                    </VerticalStackLayout>
+
+                    <FlexLayout
+                        Direction="Row"
+                        Wrap="Wrap"
+                        AlignItems="Center"
+                        JustifyContent="Start">
+                        <Button
+                            Command="{Binding ReconnectLiveTransportCommand}"
+                            Margin="0,0,10,10"
+                            Text="Reconnect" />
+                        <Button
+                            Command="{Binding RefreshStatusCommand}"
+                            Margin="0,0,10,10"
+                            Text="Refresh" />
+                        <Button
+                            Command="{Binding ReturnToProjectsCommand}"
+                            Margin="0,0,10,10"
+                            Text="Projects" />
+                        <Button
+                            Command="{Binding ClearLocalShellContextCommand}"
+                            Margin="0,0,10,10"
+                            Text="Clear" />
+                    </FlexLayout>
+                </VerticalStackLayout>
+            </Border>
+
+            <Border
+                IsVisible="{Binding HasStatus}"
+                Padding="12"
+                StrokeShape="RoundRectangle 14">
                 <Label
-                    FontAttributes="Bold"
-                    FontSize="32"
-                    Text="Active session" />
-                <Label Text="{Binding TranscriptPlaceholder}" />
+                    FontSize="13"
+                    Text="{Binding StatusMessage}" />
+            </Border>
+
+            <Border
+                IsVisible="{Binding HasError}"
+                Padding="12"
+                BackgroundColor="#FDE7E9"
+                Stroke="IndianRed"
+                StrokeShape="RoundRectangle 14">
+                <Label
+                    FontSize="13"
+                    Text="{Binding ErrorMessage}"
+                    TextColor="IndianRed" />
+            </Border>
+
+            <VerticalStackLayout
+                BindableLayout.ItemsSource="{Binding StatusBanners}"
+                IsVisible="{Binding HasStatusBanners}"
+                Spacing="8">
+                <BindableLayout.ItemTemplate>
+                    <DataTemplate>
+                        <Border
+                            Padding="12"
+                            StrokeShape="RoundRectangle 16">
+                            <Border.Triggers>
+                                <DataTrigger
+                                    TargetType="Border"
+                                    Binding="{Binding Severity}"
+                                    Value="Success">
+                                    <Setter Property="BackgroundColor" Value="#E8F7EE" />
+                                </DataTrigger>
+                                <DataTrigger
+                                    TargetType="Border"
+                                    Binding="{Binding Severity}"
+                                    Value="Warning">
+                                    <Setter Property="BackgroundColor" Value="#FFF4DD" />
+                                </DataTrigger>
+                                <DataTrigger
+                                    TargetType="Border"
+                                    Binding="{Binding Severity}"
+                                    Value="Error">
+                                    <Setter Property="BackgroundColor" Value="#FDE7E9" />
+                                    <Setter Property="Stroke" Value="IndianRed" />
+                                </DataTrigger>
+                            </Border.Triggers>
+
+                            <VerticalStackLayout Spacing="2">
+                                <Label
+                                    FontAttributes="Bold"
+                                    FontSize="13"
+                                    Text="{Binding Title}" />
+                                <Label
+                                    FontSize="12"
+                                    Text="{Binding Message}" />
+                            </VerticalStackLayout>
+                        </Border>
+                    </DataTemplate>
+                </BindableLayout.ItemTemplate>
             </VerticalStackLayout>
-
-            <Border
-                Padding="16"
-                StrokeShape="RoundRectangle 16">
-                <VerticalStackLayout Spacing="10">
-                    <Label
-                        FontAttributes="Bold"
-                        FontSize="18"
-                        Text="Shell state" />
-                    <Label Text="{Binding SessionSummary}" />
-                    <Label Text="{Binding EnvironmentSummary}" />
-                    <Label Text="{Binding AuthenticationSummary}" />
-                    <Label Text="{Binding MessagingSummary}" />
-                    <Label
-                        IsVisible="{Binding HasError}"
-                        Text="{Binding ErrorMessage}"
-                        TextColor="IndianRed" />
-                </VerticalStackLayout>
-            </Border>
-
-            <Border
-                Padding="16"
-                StrokeShape="RoundRectangle 16">
-                <Grid
-                    ColumnDefinitions="Auto,*"
-                    RowDefinitions="Auto,Auto,Auto,Auto,Auto"
-                    ColumnSpacing="12"
-                    RowSpacing="10">
-                    <Label Text="Project" />
-                    <Label
-                        Grid.Column="1"
-                        Text="{Binding ProjectName}" />
-
-                    <Label
-                        Grid.Row="1"
-                        Text="Root" />
-                    <Label
-                        Grid.Row="1"
-                        Grid.Column="1"
-                        LineBreakMode="CharacterWrap"
-                        Text="{Binding ProjectRoot}" />
-
-                    <Label
-                        Grid.Row="2"
-                        Text="Session" />
-                    <Label
-                        Grid.Row="2"
-                        Grid.Column="1"
-                        LineBreakMode="CharacterWrap"
-                        Text="{Binding SessionId}" />
-
-                    <Label
-                        Grid.Row="3"
-                        Text="State" />
-                    <Label
-                        Grid.Row="3"
-                        Grid.Column="1"
-                        Text="{Binding SessionState}" />
-
-                    <Label
-                        Grid.Row="4"
-                        Text="Started" />
-                    <Label
-                        Grid.Row="4"
-                        Grid.Column="1"
-                        Text="{Binding StartedAt}" />
-                </Grid>
-            </Border>
-
-            <Border
-                Padding="16"
-                StrokeShape="RoundRectangle 16">
-                <VerticalStackLayout Spacing="10">
-                    <Label
-                        FontAttributes="Bold"
-                        FontSize="18"
-                        Text="Source and navigation" />
-                    <Label Text="{Binding SourceSummary}" />
-                    <Button
-                        Command="{Binding ReconnectLiveTransportCommand}"
-                        Text="Retry live transport" />
-                    <Button
-                        Command="{Binding RefreshStatusCommand}"
-                        Text="Refresh broker state" />
-                    <Button
-                        Command="{Binding ReturnToProjectsCommand}"
-                        Text="Back to projects" />
-                    <Button
-                        Command="{Binding ClearLocalShellContextCommand}"
-                        Text="Clear shell context" />
-                </VerticalStackLayout>
-            </Border>
         </VerticalStackLayout>
-    </ScrollView>
+
+        <CollectionView
+            x:Name="TranscriptView"
+            Grid.Row="1"
+            ItemsSource="{Binding TranscriptMessages}"
+            Scrolled="OnTranscriptScrolled"
+            SelectionMode="None">
+            <CollectionView.EmptyView>
+                <Grid Padding="24">
+                    <VerticalStackLayout
+                        HorizontalOptions="Center"
+                        VerticalOptions="Center"
+                        Spacing="8">
+                        <Label
+                            FontAttributes="Bold"
+                            FontSize="22"
+                            HorizontalTextAlignment="Center"
+                            Text="{Binding EmptyStateTitle}" />
+                        <Label
+                            HorizontalTextAlignment="Center"
+                            Text="{Binding EmptyStateDescription}" />
+                    </VerticalStackLayout>
+                </Grid>
+            </CollectionView.EmptyView>
+
+            <CollectionView.ItemTemplate>
+                <DataTemplate>
+                    <Grid Padding="20,0,20,0">
+                        <VerticalStackLayout
+                            x:Name="MessageContainer"
+                            Margin="0,12,48,0"
+                            Spacing="4">
+                            <VerticalStackLayout.Triggers>
+                                <DataTrigger
+                                    TargetType="VerticalStackLayout"
+                                    Binding="{Binding UseCompactTopSpacing}"
+                                    Value="True">
+                                    <Setter Property="Margin" Value="0,4,48,0" />
+                                </DataTrigger>
+                                <DataTrigger
+                                    TargetType="VerticalStackLayout"
+                                    Binding="{Binding IsOutgoing}"
+                                    Value="True">
+                                    <Setter Property="HorizontalOptions" Value="End" />
+                                    <Setter Property="Margin" Value="48,12,0,0" />
+                                </DataTrigger>
+                                <MultiTrigger TargetType="VerticalStackLayout">
+                                    <MultiTrigger.Conditions>
+                                        <BindingCondition
+                                            Binding="{Binding IsOutgoing}"
+                                            Value="True" />
+                                        <BindingCondition
+                                            Binding="{Binding UseCompactTopSpacing}"
+                                            Value="True" />
+                                    </MultiTrigger.Conditions>
+                                    <Setter Property="Margin" Value="48,4,0,0" />
+                                </MultiTrigger>
+                                <DataTrigger
+                                    TargetType="VerticalStackLayout"
+                                    Binding="{Binding IsSystem}"
+                                    Value="True">
+                                    <Setter Property="HorizontalOptions" Value="Center" />
+                                    <Setter Property="Margin" Value="24,12,24,0" />
+                                </DataTrigger>
+                            </VerticalStackLayout.Triggers>
+
+                            <Label
+                                IsVisible="{Binding ShowSpeakerLabel}"
+                                FontAttributes="Bold"
+                                FontSize="12"
+                                Text="{Binding SpeakerLabel}"
+                                TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray300}}" />
+
+                            <Border
+                                x:Name="Bubble"
+                                Padding="14,10"
+                                BackgroundColor="{AppThemeBinding Light={StaticResource Gray100}, Dark={StaticResource Gray600}}"
+                                StrokeThickness="0"
+                                StrokeShape="RoundRectangle 18">
+                                <Border.Triggers>
+                                    <DataTrigger
+                                        TargetType="Border"
+                                        Binding="{Binding IsOutgoing}"
+                                        Value="True">
+                                        <Setter Property="BackgroundColor" Value="{StaticResource Primary}" />
+                                    </DataTrigger>
+                                    <DataTrigger
+                                        TargetType="Border"
+                                        Binding="{Binding IsSystem}"
+                                        Value="True">
+                                        <Setter Property="BackgroundColor" Value="{AppThemeBinding Light={StaticResource Gray100}, Dark={StaticResource Gray800}}" />
+                                    </DataTrigger>
+                                    <DataTrigger
+                                        TargetType="Border"
+                                        Binding="{Binding IsError}"
+                                        Value="True">
+                                        <Setter Property="BackgroundColor" Value="#FDE7E9" />
+                                        <Setter Property="Stroke" Value="IndianRed" />
+                                        <Setter Property="StrokeThickness" Value="1" />
+                                    </DataTrigger>
+                                </Border.Triggers>
+
+                                <Label
+                                    x:Name="BubbleText"
+                                    LineBreakMode="WordWrap"
+                                    Text="{Binding Text}">
+                                    <Label.Triggers>
+                                        <DataTrigger
+                                            TargetType="Label"
+                                            Binding="{Binding IsOutgoing}"
+                                            Value="True">
+                                            <Setter Property="TextColor" Value="White" />
+                                        </DataTrigger>
+                                        <DataTrigger
+                                            TargetType="Label"
+                                            Binding="{Binding IsSystem}"
+                                            Value="True">
+                                            <Setter Property="HorizontalTextAlignment" Value="Center" />
+                                        </DataTrigger>
+                                        <DataTrigger
+                                            TargetType="Label"
+                                            Binding="{Binding IsError}"
+                                            Value="True">
+                                            <Setter Property="TextColor" Value="IndianRed" />
+                                        </DataTrigger>
+                                    </Label.Triggers>
+                                </Label>
+                            </Border>
+
+                            <Label
+                                x:Name="TimestampLabel"
+                                IsVisible="{Binding ShowTimestamp}"
+                                FontSize="11"
+                                Text="{Binding TimestampLabel}"
+                                TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray300}}">
+                                <Label.Triggers>
+                                    <DataTrigger
+                                        TargetType="Label"
+                                        Binding="{Binding IsOutgoing}"
+                                        Value="True">
+                                        <Setter Property="HorizontalOptions" Value="End" />
+                                    </DataTrigger>
+                                    <DataTrigger
+                                        TargetType="Label"
+                                        Binding="{Binding IsSystem}"
+                                        Value="True">
+                                        <Setter Property="HorizontalOptions" Value="Center" />
+                                    </DataTrigger>
+                                </Label.Triggers>
+                            </Label>
+                        </VerticalStackLayout>
+                    </Grid>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+
+        <Border
+            Grid.Row="2"
+            Margin="20,12,20,24"
+            Padding="14"
+            StrokeShape="RoundRectangle 24">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <Editor
+                    AutoSize="TextChanges"
+                    MaxLength="2000"
+                    Placeholder="{Binding ComposerPlaceholder}"
+                    Text="{Binding ComposerText}" />
+                <Button
+                    Grid.Column="1"
+                    Command="{Binding SendMessageCommand}"
+                    Text="Send"
+                    VerticalOptions="End" />
+            </Grid>
+        </Border>
+    </Grid>
 </ContentPage>
