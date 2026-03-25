@@ -72,6 +72,8 @@ public sealed class PubSubConnectionServiceTests
         await WaitForAsync(() => service.RecentTraffic.Count == 2);
 
         using var sendCommand = JsonDocument.Parse(socket.SentTexts[1]);
+        Assert.Equal("event", sendCommand.RootElement.GetProperty("type").GetString());
+        Assert.Equal(SessionUpstreamEventNames.Input, sendCommand.RootElement.GetProperty("event").GetString());
         var envelope = sendCommand.RootElement.GetProperty("data")
             .Deserialize<MessageEnvelope<JsonElement>>(SessionMessageSerializer.DefaultOptions);
 

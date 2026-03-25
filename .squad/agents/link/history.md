@@ -148,3 +148,10 @@
 - **Validation still green:** `dotnet test .\SquadScout.slnx -nologo --no-build --logger "console;verbosity=minimal"` passes with 76/76 tests (8 app, 68 broker), so the remaining problem is end-to-end routing completeness rather than a current unit-test failure.
 - **Decision:** Do not open the #14 PR until the inbound command-ingress seam is implemented or the team explicitly narrows #14’s scope.
 
+### Issue #14 Completion — Web PubSub Inbound Handler (2026-03-25)
+
+- **Ingress seam closed:** `src\SquadScout.Functions\WebPubSubUpstreamFunction.cs` plus `src\SquadScout.Functions\Upstream\WebPubSubUpstreamHandler.cs` now accept Azure Web PubSub custom-event webhooks, return the required `WebHook-Allowed-Origin` validation header, deserialize client `InputChunkPayload` envelopes, and forward them into the existing broker `/api/sessions/{sessionId}/input` path.
+- **Transport contract corrected:** `src\SquadScout.Contracts\Realtime\SessionUpstreamEventNames.cs` now defines the shared custom event name `session-input`, and `src\SquadScout.App\Services\MessagingConnectionService.cs` sends live client input with Web PubSub `event` frames instead of `sendToGroup`, because upstream handlers are only invoked for custom events.
+- **Local orchestration wiring completed:** `src\SquadScout.Functions\Configuration\FunctionsHostOptions.cs`, `Program.cs`, `local.settings.sample.json`, and `src\SquadScout.AppHost\AppHost.cs` now carry an explicit broker base URL into the Functions host so local Aspire runs and standalone local settings both know how to reach the broker ingress endpoint.
+- **Regression proof points:** `tests\SquadScout.Broker.Tests\PubSubUpstreamHandlerTests.cs` now covers successful forward, malformed envelopes, webhook validation, and broker conflict propagation; `tests\SquadScout.App.Tests\PubSubConnectionServiceTests.cs` now locks the app-side `event` command shape.
+

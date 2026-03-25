@@ -6,16 +6,12 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using SquadScout.Contracts.Messages;
 using SquadScout.Functions.Configuration;
 using SquadScout.Functions.Negotiation;
+using SquadScout.Functions.Upstream;
 
-var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
-{
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-};
-jsonOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+var jsonOptions = SessionMessageSerializer.CreateDefaultOptions();
 
 var builder = FunctionsApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
@@ -32,6 +28,9 @@ builder.Services
     .Validate(
         options => Uri.TryCreate(options.WebPubSubEndpoint, UriKind.Absolute, out _),
         $"{FunctionsHostOptions.SectionName}:WebPubSubEndpoint must be an absolute URI.")
+    .Validate(
+        options => Uri.TryCreate(options.BrokerBaseUrl, UriKind.Absolute, out _),
+        $"{FunctionsHostOptions.SectionName}:BrokerBaseUrl must be an absolute URI.")
     .ValidateOnStart();
 
 builder.Services.AddSingleton<TimeProvider>(_ => TimeProvider.System);
@@ -54,5 +53,11 @@ builder.Services.AddSingleton(serviceProvider =>
 builder.Services.AddSingleton<IWebPubSubAccessUriClient, ManagedIdentityWebPubSubAccessUriClient>();
 builder.Services.AddSingleton<NegotiationIdentityResolver>();
 builder.Services.AddSingleton<WebPubSubNegotiationService>();
+builder.Services.AddHttpClient<BrokerInputForwarder>((serviceProvider, client) =>
+{
+    var options = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<FunctionsHostOptions>>().Value;
+    client.BaseAddress = new Uri(options.BrokerBaseUrl, UriKind.Absolute);
+});
+builder.Services.AddSingleton<WebPubSubUpstreamHandler>();
 
 builder.Build().Run();
