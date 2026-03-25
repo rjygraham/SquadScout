@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+name: squadscout
+metadata:
+  template: squadscout@0.0.1-alpha
+services:
+  functions:
+    project: ./src/SquadScout.Functions
+    language: dotnet
+    host: function
+hooks:
+  preprovision:
+    windows:
+      shell: pwsh
+      run: |
+        Write-Host "Preparing Azure infrastructure provisioning..."
+        Write-Host "Target location: $env:AZURE_LOCATION"
+    posix:
+      shell: sh
+      run: |
+        echo "Preparing Azure infrastructure provisioning..."
+        echo "Target location: $AZURE_LOCATION"
