@@ -137,3 +137,14 @@
 - **Team sign-offs:** Neo (landing), Link (diagnostics contract), Morpheus (security ✅), Switch (acceptance ✅). No blocking gaps remain for Phase 1 scope.
 - **Next:** Merge PR #57 and prepare Phase 2 handoff (Issue #2, Orleans clustering). Session log: 2026-03-25T21-41-50Z-issue-17-landing.md.
 
+### 2026-03-25 — Issue #62 Phase 1 Azure Footprint Review (Neo)
+
+- **Scope Analysis:** Phase 1 Azure footprint is minimal and honest — no speculative Orleans/distributed features baked into IaC prematurely.
+- **Required Resources (4):** Azure Functions (Negotiate + Upstream endpoints, .NET 8.0 isolated worker), Azure Web PubSub (realtime transport hub), Managed Identity (Functions → Web PubSub token auth), Storage Account (runtime dependency).
+- **Code Quality Check:** Functions use `DefaultAzureCredential` for managed identity auth (no connection strings in code). Broker designed for optional Web PubSub relay (can run local fallback). MAUI app clean dependency separation.
+- **Configuration Gaps:** Entra app registration out of Bicep scope (manual prerequisite). Web PubSub upstream validation uses app-level `TrustedUpstreamPrincipalIds` instead of Azure RBAC (document in IaC README). Local settings → cloud config bridge must be orchestrated by `azure.yaml`.
+- **AZD Fit Assessment:** GOOD. Phase 1 resource set is small and declarative. No blocking architectural issues. Seraph should deliver `infra/main.bicep`, `azure.yaml`, `infra/parameters.bicepparams`, and `infra/README.md` documenting prerequisites and deployment.
+- **Decision File:** `.squad/decisions/inbox/neo-issue-62-review.md` — full Phase 1 scope analysis, acceptance criteria for Seraph, and architecture-level decision (minimal honest footprint with no future speculation).
+- **Routing:** Confirm assignment to Seraph (Cloud/Auth Dev domain match). Secondary recommendation: Link-owned follow-up for scripted Entra app registration (out of Bicep but needed for turnkey deployment).
+- **Key Insight:** Temptation exists to speculate on future Orleans/distributed features in IaC. Decision: focus on what current code requires. Phase 2 Orleans state will require new resources; don't assume them now.
+
