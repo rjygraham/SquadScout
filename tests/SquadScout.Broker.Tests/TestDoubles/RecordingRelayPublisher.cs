@@ -1,6 +1,7 @@
 using System.Text.Json;
 using SquadScout.Broker.Relay;
 using SquadScout.Contracts.Messages;
+using SquadScout.Contracts.Realtime;
 using SquadScout.Contracts.Sessions;
 
 namespace SquadScout.Broker.Tests.TestDoubles;
@@ -10,6 +11,8 @@ public sealed class RecordingRelayPublisher : IRelayPublisher
     private readonly object _syncRoot = new();
     private readonly List<MessageEnvelope<JsonElement>> _publishedEnvelopes = [];
     private readonly List<SessionDescriptor> _startedSessions = [];
+    private readonly List<string> _joinedSessionGroups = [];
+    private readonly List<string> _leftSessionGroups = [];
 
     public IReadOnlyList<SessionDescriptor> StartedSessions
     {
@@ -33,6 +36,28 @@ public sealed class RecordingRelayPublisher : IRelayPublisher
         }
     }
 
+    public IReadOnlyList<string> JoinedSessionGroups
+    {
+        get
+        {
+            lock (_syncRoot)
+            {
+                return _joinedSessionGroups.ToArray();
+            }
+        }
+    }
+
+    public IReadOnlyList<string> LeftSessionGroups
+    {
+        get
+        {
+            lock (_syncRoot)
+            {
+                return _leftSessionGroups.ToArray();
+            }
+        }
+    }
+
     public Task PublishSessionStartedAsync(SessionDescriptor session, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -41,6 +66,7 @@ public sealed class RecordingRelayPublisher : IRelayPublisher
         lock (_syncRoot)
         {
             _startedSessions.Add(session);
+            _joinedSessionGroups.Add(SessionGroupName.Create(session.ProjectId, session.SessionId));
         }
 
         return Task.CompletedTask;
@@ -54,6 +80,13 @@ public sealed class RecordingRelayPublisher : IRelayPublisher
         lock (_syncRoot)
         {
             _publishedEnvelopes.Add(ToSnapshot(envelope));
+
+            if (envelope.MessageType == SessionMessageType.SessionLifecycle &&
+                envelope.Payload is SessionLifecyclePayload lifecycle &&
+                lifecycle.State == SessionState.Stopped)
+            {
+                _leftSessionGroups.Add(SessionGroupName.Create(envelope.ProjectId, envelope.SessionId));
+            }
         }
 
         return Task.CompletedTask;

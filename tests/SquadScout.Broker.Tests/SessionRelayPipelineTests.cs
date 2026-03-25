@@ -8,6 +8,7 @@ using SquadScout.Broker.Sessions;
 using SquadScout.Broker.Tests.TestDoubles;
 using SquadScout.Contracts.Messages;
 using SquadScout.Contracts.Projects;
+using SquadScout.Contracts.Realtime;
 using SquadScout.Contracts.Sessions;
 
 namespace SquadScout.Broker.Tests;
@@ -37,6 +38,8 @@ public sealed class SessionRelayPipelineTests
 
         var validation = await relay.RelayInputAsync(session.SessionId, CreateInputEnvelope(session, clientSequence: 1, "status --json\n"));
         Assert.Equal(SequenceValidationStatus.Accepted, validation.Status);
+        var sessionGroup = SessionGroupName.Create(session.ProjectId, session.SessionId);
+        Assert.Equal(sessionGroup, Assert.Single(harness.SessionGroupResolver.ResolvedEnvelopeGroups));
 
         var ptySession = harness.PtyHost.GetRequiredSession(session.SessionId);
         Assert.Equal(["status --json\n"], ptySession.WrittenInputs);
@@ -46,6 +49,8 @@ public sealed class SessionRelayPipelineTests
         ptySession.ReleaseAll();
 
         var published = await harness.RelayPublisher.WaitForEnvelopeCountAsync(3);
+        Assert.Equal(sessionGroup, Assert.Single(harness.RelayPublisher.JoinedSessionGroups));
+        Assert.Equal(sessionGroup, Assert.Single(harness.RelayPublisher.LeftSessionGroups));
 
         Assert.Collection(
             published.Take(3),
@@ -132,6 +137,7 @@ public sealed class SessionRelayPipelineTests
             orchestrator,
             ptyHost,
             new PtySessionEnvelopePump(orchestrator),
+            new SessionGroupResolver(),
             NullLogger<InMemorySessionRelay>.Instance);
 
         var session = await relay.StartAsync(new StartSessionCommand
@@ -197,6 +203,7 @@ public sealed class SessionRelayPipelineTests
             orchestrator,
             ptyHost,
             new PtySessionEnvelopePump(orchestrator),
+            new SessionGroupResolver(),
             NullLogger<InMemorySessionRelay>.Instance);
 
         var session = await relay.StartAsync(new StartSessionCommand
@@ -437,7 +444,7 @@ public sealed class SessionRelayPipelineTests
         var relayPublisher = new RecordingRelayPublisher();
         var orchestrator = new InMemorySessionOrchestrator(relayPublisher, new SessionSequenceValidator(), replayBufferCapacity: 8);
         var ptyHost = new MockPtyHost();
-        return new RelayHarness(catalog, relayPublisher, orchestrator, ptyHost);
+        return new RelayHarness(catalog, relayPublisher, orchestrator, ptyHost, new RecordingSessionGroupResolver());
     }
 
     private static Task<RelayHarness> CreateHarnessWithoutProjectsAsync()
@@ -446,7 +453,7 @@ public sealed class SessionRelayPipelineTests
         var relayPublisher = new RecordingRelayPublisher();
         var orchestrator = new InMemorySessionOrchestrator(relayPublisher, new SessionSequenceValidator(), replayBufferCapacity: 8);
         var ptyHost = new MockPtyHost();
-        return Task.FromResult(new RelayHarness(catalog, relayPublisher, orchestrator, ptyHost));
+        return Task.FromResult(new RelayHarness(catalog, relayPublisher, orchestrator, ptyHost, new RecordingSessionGroupResolver()));
     }
 
     private static MessageEnvelope<InputChunkPayload> CreateInputEnvelope(
@@ -530,12 +537,14 @@ public sealed class SessionRelayPipelineTests
             InMemoryProjectCatalog projectCatalog,
             RecordingRelayPublisher relayPublisher,
             InMemorySessionOrchestrator orchestrator,
-            MockPtyHost ptyHost)
+            MockPtyHost ptyHost,
+            RecordingSessionGroupResolver sessionGroupResolver)
         {
             ProjectCatalog = projectCatalog;
             RelayPublisher = relayPublisher;
             Orchestrator = orchestrator;
             PtyHost = ptyHost;
+            SessionGroupResolver = sessionGroupResolver;
         }
 
         public InMemoryProjectCatalog ProjectCatalog { get; }
@@ -546,12 +555,15 @@ public sealed class SessionRelayPipelineTests
 
         public MockPtyHost PtyHost { get; }
 
+        public RecordingSessionGroupResolver SessionGroupResolver { get; }
+
         public InMemorySessionRelay CreateRelay() =>
             new(
                 ProjectCatalog,
                 Orchestrator,
                 PtyHost,
                 new PtySessionEnvelopePump(Orchestrator),
+                SessionGroupResolver,
                 NullLogger<InMemorySessionRelay>.Instance);
     }
 

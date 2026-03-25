@@ -132,3 +132,11 @@
 - **Rationale:** Single logical commit, clean history, minimizes downstream rebase conflicts
 - **Result:** Aspire + ServiceDefaults now integrated into main; unblocks Phase 2 grain activation and multi-project orchestration testing
 
+### Issue #14 Broker PubSub Session Routing Slice (2026-03-25)
+
+- **Routing rule centralized:** `src\SquadScout.Broker\Relay\SessionGroupResolver.cs` now makes the broker consume the approved base session-group contract `session:{projectId}:{sessionId}` directly from shared contracts, while still leaving the optional `:brokerId` suffix dormant for later broker-affinity work.
+- **Broker relay seam upgraded:** `src\SquadScout.Broker\Relay\AzureWebPubSubRelayPublisher.cs` and `AzureWebPubSubGroupClient.cs` now give the broker a real Azure Web PubSub publish path when `AzureWebPubSub:ConnectionString` is configured, and they explicitly track broker join/leave on session start/stop before and after PTY lifecycle traffic is published.
+- **Inbound alignment without faking #11:** `src\SquadScout.Broker\Relay\InMemorySessionRelay.cs` now resolves the same session group for accepted client input so routing stays explicit and testable, but live MAUI join/leave plus actual Web PubSub command ingress still depend on issue #11’s missing client connection service.
+- **Proof points:** `tests\SquadScout.Broker.Tests\SessionRelayPipelineTests.cs`, `AzureWebPubSubRelayPublisherTests.cs`, `SessionGroupResolverTests.cs`, and the updated `RecordingRelayPublisher` now cover approved group naming, broker join/leave tracking, and PTY message fan-out routing.
+- **Validation:** `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` both pass in `D:\GitHub\SquadScout-14` after the routing slice.
+

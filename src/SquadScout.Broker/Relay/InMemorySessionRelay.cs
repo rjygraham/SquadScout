@@ -15,6 +15,7 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
     private readonly ISessionOrchestrator _orchestrator;
     private readonly IPtyHost _ptyHost;
     private readonly PtySessionEnvelopePump _ptyPump;
+    private readonly ISessionGroupResolver _sessionGroupResolver;
     private readonly ILogger<InMemorySessionRelay> _logger;
     private readonly ConcurrentDictionary<string, ActiveRelaySession> _activeSessions = new(StringComparer.OrdinalIgnoreCase);
     private long _nextMessageId;
@@ -24,12 +25,14 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
         ISessionOrchestrator orchestrator,
         IPtyHost ptyHost,
         PtySessionEnvelopePump ptyPump,
+        ISessionGroupResolver sessionGroupResolver,
         ILogger<InMemorySessionRelay> logger)
     {
         _projectCatalog = projectCatalog ?? throw new ArgumentNullException(nameof(projectCatalog));
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _ptyHost = ptyHost ?? throw new ArgumentNullException(nameof(ptyHost));
         _ptyPump = ptyPump ?? throw new ArgumentNullException(nameof(ptyPump));
+        _sessionGroupResolver = sessionGroupResolver ?? throw new ArgumentNullException(nameof(sessionGroupResolver));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -167,6 +170,7 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
         }
 
         var activeSession = await GetRequiredActiveSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var sessionGroup = _sessionGroupResolver.Resolve(envelope);
 
         await activeSession.StopInputGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -183,7 +187,16 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
             return await _orchestrator.AcceptClientMessageAsync(
                 sessionId,
                 envelope,
-                (acceptedEnvelope, token) => activeSession.PtySession.WriteAsync(acceptedEnvelope.Payload.Content, token),
+                async (acceptedEnvelope, token) =>
+                {
+                    _logger.LogDebug(
+                        "Routing client input {MessageId} for project {ProjectId} session {SessionId} through session group {SessionGroup}.",
+                        acceptedEnvelope.MessageId,
+                        acceptedEnvelope.ProjectId,
+                        acceptedEnvelope.SessionId,
+                        sessionGroup);
+                    await activeSession.PtySession.WriteAsync(acceptedEnvelope.Payload.Content, token).ConfigureAwait(false);
+                },
                 cancellationToken).ConfigureAwait(false);
         }
         finally
