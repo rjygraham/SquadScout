@@ -140,3 +140,11 @@
 - **Proof points:** `tests\SquadScout.Broker.Tests\SessionRelayPipelineTests.cs`, `AzureWebPubSubRelayPublisherTests.cs`, `SessionGroupResolverTests.cs`, and the updated `RecordingRelayPublisher` now cover approved group naming, broker join/leave tracking, and PTY message fan-out routing.
 - **Validation:** `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` both pass in `D:\GitHub\SquadScout-14` after the routing slice.
 
+### Issue #14 Reassessment After #11 Merge (2026-03-25)
+
+- **Rebase checkpoint:** PR #48 / issue #11 is now merged on `main`, and `squad/14-pubsub-session-routing-group-membership` was rebased cleanly onto that state.
+- **Original blocker removed:** `src\SquadScout.App\Services\MessagingConnectionService.cs` is no longer the old ready-state stub; it now negotiates and connects to Azure Web PubSub, so MAUI-side session-group join logic is present.
+- **Remaining blocker made explicit:** Client input now goes out as `WebPubSubSendToGroupCommand`, but `src\SquadScout.Functions` still only exposes `NegotiateFunction` and the broker still only ingests live input via `POST /api/sessions/{sessionId}/input`. There is no inbound Web PubSub event/upstream handler forwarding group messages back into the broker.
+- **Validation still green:** `dotnet test .\SquadScout.slnx -nologo --no-build --logger "console;verbosity=minimal"` passes with 76/76 tests (8 app, 68 broker), so the remaining problem is end-to-end routing completeness rather than a current unit-test failure.
+- **Decision:** Do not open the #14 PR until the inbound command-ingress seam is implemented or the team explicitly narrows #14’s scope.
+
