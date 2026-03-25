@@ -76,6 +76,13 @@
 - **Proof path:** `tests\SquadScout.Broker.Tests\CopilotPtyHostTests.cs` now covers direct spawn success, startup failure surfacing, pre-start cancellation, idempotent teardown, exit-code reporting, chunked output streaming, and real PTY-to-envelope pumping without introducing shell mode.
 - **Validation:** `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` both pass on this workspace after the PTY lifecycle fix.
 
+### Issue #13 Broker Session Start/Stop Endpoints (2026-03-25)
+
+- **Lifecycle surface added:** `src\SquadScout.Broker\Program.cs` now exposes `POST /api/sessions/{sessionId}/stop`, and the broker contracts add `src\SquadScout.Contracts\Sessions\StopSessionCommand.cs` for caller-supplied project/session context.
+- **Start validation tightened:** `src\SquadScout.Broker\Relay\InMemorySessionRelay.cs` now rejects unknown projects and missing/stale repository roots before minting a broker session, so invalid start requests return actionable 404/409 errors instead of creating orphaned pending sessions.
+- **Stop sequencing stays single-owner:** Stop requests are handled inside `InMemorySessionRelay`, which validates `{ sessionId, projectId }`, marks stop-in-progress to block new input, terminates the PTY, and then lets the existing `PtySessionEnvelopePump` publish the final replayable `SessionLifecycle(Stopped)` envelope from the PTY `Exited` event.
+- **Proof path:** `tests\SquadScout.Broker.Tests\SessionRelayPipelineTests.cs` now covers successful stop, project mismatch, already-stopped rejection, and unknown-project start rejection; `dotnet build .\SquadScout.slnx -nologo` plus `dotnet test .\SquadScout.slnx -nologo --no-build` both pass in `D:\GitHub\SquadScout-13`.
+
 ### Issue #5 Completion — CopilotPtyHost Direct Spawn (2026-03-24T21:36:52Z)
 
 - **Mission:** Implement Copilot PTY host using Pty.Net, preserving the PTY seam established in issue #4, with comprehensive failure-mode and lifecycle coverage.
