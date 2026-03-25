@@ -24,3 +24,14 @@
 - Decision inbox processed: trinity-pr43-merge.md merged into decisions.md and removed from inbox.
 - Cross-agent histories updated: Morpheus history appended with issue #12 completion, Switch history appended with issue #12 review gate initiation.
 - Formal review gate activated; Switch to evaluate PR #45 for token validation completeness and security posture.
+
+### Issue #12 Review Verdict Session (2026-03-25T00:28:54Z)
+
+- Switch completed formal review of PR #45 (issue #12).
+- **Verdict: APPROVED** — Build green (local validated), focused tests 14/14 (PubSubNegotiateEndpointTests), full tests 61/61.
+- Security review confirmed: Easy Auth fails closed outside Azure Functions host, header/payload tampering rejected, broker ID scoping enforced, session isolation validated, response hygiene verified.
+- Orchestration logs written: 2026-03-25T00-28-54Z-switch.md (review verdict) and 2026-03-25T00-28-54Z-morpheus.md (merge-watch kickoff).
+- Session log written to 2026-03-25T00-28-54Z-issue-12-review.md.
+- Decision inbox entry (switch-issue12-review.md) merged into decisions.md and removed from inbox.
+- Morpheus activated for merge-watch mode to monitor PR #45 merge to main.
+- Merge risk assessed as LOW; caveats: GitHub check runs not configured, Azure Web PubSub integration unit/local validated only.

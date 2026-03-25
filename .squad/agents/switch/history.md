@@ -227,3 +227,11 @@
 - **Blocking finding 2:** stop-related input rejection returns a generic 409 `{ message }` via `InvalidOperationException` instead of the new structured `SessionControlException` shape. That leaves future clients without a stable machine-readable lifecycle code for the "stopping" case.
 - **Coverage gap that matters:** `SessionRelayPipelineTests` prove completed-stop, already-exited, and project-mismatch behavior, but do not exercise stop-in-flight input rejection or concurrent stop overlap. For lifecycle work, happy-path stop coverage is not enough.
 - **Recommended next reviser:** Morpheus. Link authored the artifact and should sit out the next correction cycle.
+
+### Issue #12 Formal Review — APPROVED (2026-03-26)
+
+- **Artifact reviewed:** PR #45 / branch `squad/12-token-validation-session-claims-hardening` at commit `5e7f232`.
+- **Validation run:** `dotnet build .\SquadScout.slnx -nologo`, focused `PubSubNegotiateEndpointTests` (14/14), and full solution tests (61/61) all passed in `D:\GitHub\SquadScout-12`.
+- **Security read:** Easy Auth headers are only trusted inside the Functions host boundary, mismatched header/payload principals are rejected, client requests cannot self-assert `brokerId`, and PubSub `userId` values are session-scoped (`participant:project:session[:broker]:principal`).
+- **Contract read:** Negotiation response surface is tighter (no echoed principal details/roles/groups), and no checked-in client/broker consumer depends on the removed fields.
+- **Merge-risk note:** No GitHub checks are attached to PR #45 yet; confidence comes from local validation only.
