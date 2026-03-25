@@ -7,6 +7,7 @@ using Azure.Messaging.WebPubSub;
 using SquadScout.Contracts.Messages;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Metrics;
@@ -28,6 +29,10 @@ builder.Services.AddOpenTelemetry()
                 && !context.Request.Path.StartsWithSegments("/alive");
         });
     });
+builder.Services.ConfigureHttpJsonOptions(static options =>
+{
+    SessionMessageSerializer.Configure(options.SerializerOptions);
+});
 
 var brokerOptions = builder.Configuration.GetSection(BrokerHostOptions.SectionName).Get<BrokerHostOptions>() ?? new BrokerHostOptions();
 var effectiveListenUrl = builder.Configuration[WebHostDefaults.ServerUrlsKey] ?? brokerOptions.ListenUrl;
@@ -128,6 +133,22 @@ app.MapGet("/api/sessions/{sessionId}", async (string sessionId, ISessionOrchest
     return session is null ? Results.NotFound() : Results.Ok(session);
 });
 
+app.MapGet("/api/sessions/{sessionId}/telemetry", async (
+    string sessionId,
+    ISessionOrchestrator orchestrator,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var telemetry = await orchestrator.ExportTelemetryAsync(sessionId, cancellationToken);
+        return Results.Ok(telemetry);
+    }
+    catch (KeyNotFoundException ex)
+    {
+        return Results.NotFound(new { message = ex.Message });
+    }
+});
+
 app.MapPost("/api/sessions/{sessionId}/stop", async (
     string sessionId,
     SquadScout.Contracts.Sessions.StopSessionCommand command,
@@ -160,8 +181,8 @@ app.MapPost("/api/sessions/{sessionId}/input", async (
         var validation = await relay.RelayInputAsync(sessionId, envelope, cancellationToken);
         return validation.Status switch
         {
-            SequenceValidationStatus.Accepted or SequenceValidationStatus.Duplicate => Results.Ok(validation),
-            SequenceValidationStatus.GapDetected or SequenceValidationStatus.StaleGeneration or SequenceValidationStatus.FutureGeneration => Results.Conflict(validation),
+            SequenceValidationStatus.Accepted or SequenceValidationStatus.Duplicate or SequenceValidationStatus.GapDetected => Results.Ok(validation),
+            SequenceValidationStatus.StaleGeneration or SequenceValidationStatus.FutureGeneration => Results.Conflict(validation),
             SequenceValidationStatus.InvalidEnvelope => Results.BadRequest(validation),
             _ => Results.BadRequest(validation)
         };

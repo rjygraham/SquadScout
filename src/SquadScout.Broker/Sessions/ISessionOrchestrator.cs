@@ -30,5 +30,7 @@ public interface ISessionOrchestrator
         MessageEnvelope<ReplayRequestPayload> request,
         CancellationToken cancellationToken = default);
 
+    Task<SessionTelemetrySnapshot> ExportTelemetryAsync(string sessionId, CancellationToken cancellationToken = default);
+
     Task<long> ResetGenerationAsync(string sessionId, CancellationToken cancellationToken = default);
 }

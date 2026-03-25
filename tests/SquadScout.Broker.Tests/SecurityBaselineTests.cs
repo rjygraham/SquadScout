@@ -77,6 +77,19 @@ public sealed class SecurityBaselineTests
     }
 
     [Fact]
+    public void SecretRedactorRedactsQuotedJsonSecretValues()
+    {
+        const string sample = "{\"password\":\"swordfish\",\"token\":\"abc123\"}";
+
+        var redacted = SecretRedactor.Redact(sample);
+
+        Assert.DoesNotContain("swordfish", redacted, StringComparison.Ordinal);
+        Assert.DoesNotContain("abc123", redacted, StringComparison.Ordinal);
+        Assert.Contains("\"password\":\"[REDACTED]\"", redacted, StringComparison.Ordinal);
+        Assert.Contains("\"token\":\"[REDACTED]\"", redacted, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SensitivePayloadsAndEnvelopesDoNotExposeContentInToString()
     {
         var payload = new InputChunkPayload
