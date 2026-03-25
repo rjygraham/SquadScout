@@ -539,6 +539,42 @@ Approved for merge. Deliverable complete: MAUI app shell ready for Phase 2 Orlea
 
 **Status:** Active — waiting for merge trigger.
 
+## Link — Issue #13 Broker Session Start/Stop Endpoints (2026-03-25)
+
+**Owner:** Link  
+**Branch:** `squad/13-broker-session-start-stop-endpoints`  
+**Commit:** bb59652  
+**PR:** #44 (closes #13)  
+
+### Decision
+
+Expose broker session lifecycle as:
+- **POST /api/sessions/start** — `StartSessionCommand` with `projectId`, `sessionId` (client-provided), request metadata
+- **POST /api/sessions/{sessionId}/stop** — `StopSessionCommand` with required `projectId` repeat (explicit project binding confirmation)
+
+Broker error codes:
+- **404:** `project_not_found`, `session_not_found`
+- **409:** `project_repository_root_missing`, `project_repository_root_not_found`, `session_project_mismatch`, `session_already_stopped`, `session_not_started`, `session_not_active`, `session_stop_in_progress`
+
+### Rationale
+
+- Repeating `projectId` on stop makes session-to-project binding explicit and prevents accidental cross-project teardown (important for future client integration).
+- Failing bad start requests before session creation avoids orphaned pending sessions and gives callers cleaner remediation paths.
+- Session lifecycle remains owned by the existing PTY event pump (`Exited` → `SessionLifecycle` envelope); no parallel stop-state machine.
+- Actionable error codes enable future relay/auth work without endpoint shape changes.
+
+### Validation
+
+- ✅ Build: green
+- ✅ Tests: 55/55 passing
+- ✅ PR #44 open with handoff notes
+
+### Follow-up
+
+If mobile UX later needs a visible "stopping" phase, add that as a separate contract change rather than overloading the current `SessionState` enum.
+
+**Status:** Handoff complete. Awaiting Switch formal review on PR #44.
+
 ## Switch — Issue #31 Review Gate: Aspire / ServiceDefaults (2026-03-25T00:08:17Z)
 
 **Owner:** Switch  
