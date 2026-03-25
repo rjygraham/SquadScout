@@ -150,3 +150,22 @@
 
 **Next:** Switch formal code review and acceptance gate on PR #43 (closes issue #9). Morpheus observing; no direct blocker on replay/security path from issue #9 unless contract changes emerge during review.
 
+### Issue #12 Token Validation & Session Claims Hardening — Morpheus DELIVERY (2026-03-25T00:20:09Z)
+
+**Status:** Complete. Token validation middleware and session claims hardening integrated; PR #45 opened (closes #12); ready for Switch formal review.
+
+**Morpheus Deliverables:**
+- `TokenValidationMiddleware.cs` — Bearer token extraction, signature validation, expiration enforcement
+- `SessionClaimsValidator.cs` — Session claim verification, project ownership binding, user context validation
+- Claims binding enforcement (project scoping, user context)
+- Broker authentication hardening in session lifecycle
+- Integrated with session state machine
+
+**Build & Test Status:**
+- ✅ Full solution compiles
+- ✅ All tests pass (baseline maintained)
+- ✅ Branch pushed to origin
+- ✅ PR #45 clean, no conflicts
+
+**Handoff:** Token validation is WS-2 critical path. Morpheus now awaits Switch's formal review gate; next revision cycle (if needed) triggers Link as per team protocol for rejection correction.
+
