@@ -4,11 +4,34 @@ using SquadScout.Broker.Projects;
 using SquadScout.Broker.Relay;
 using SquadScout.Broker.Sessions;
 using SquadScout.Contracts.Messages;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddServiceDefaults();
+builder.Services
+    .AddHealthChecks()
+    .AddCheck("self", () => HealthCheckResult.Healthy(), ["live"]);
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(metrics => metrics.AddAspNetCoreInstrumentation())
+    .WithTracing(tracing =>
+    {
+        tracing.AddAspNetCoreInstrumentation(options =>
+        {
+            options.Filter = context =>
+                !context.Request.Path.StartsWithSegments("/health")
+                && !context.Request.Path.StartsWithSegments("/alive");
+        });
+    });
 
 var brokerOptions = builder.Configuration.GetSection(BrokerHostOptions.SectionName).Get<BrokerHostOptions>() ?? new BrokerHostOptions();
-builder.WebHost.UseUrls(brokerOptions.ListenUrl);
+if (string.IsNullOrWhiteSpace(builder.Configuration[WebHostDefaults.ServerUrlsKey]))
+{
+    builder.WebHost.UseUrls(brokerOptions.ListenUrl);
+}
 
 builder.Services.Configure<BrokerHostOptions>(builder.Configuration.GetSection(BrokerHostOptions.SectionName));
 builder.Services.Configure<CopilotPtyHostOptions>(builder.Configuration.GetSection(CopilotPtyHostOptions.SectionName));
@@ -21,6 +44,13 @@ builder.Services.AddSingleton<ISequenceValidator, SessionSequenceValidator>();
 builder.Services.AddSingleton<ISessionOrchestrator, InMemorySessionOrchestrator>();
 
 var app = builder.Build();
+if (app.Environment.IsDevelopment())
+{
+    app.MapHealthChecks("/alive", new HealthCheckOptions
+    {
+        Predicate = registration => registration.Tags.Contains("live")
+    });
+}
 
 app.MapGet("/", () => Results.Ok(new
 {

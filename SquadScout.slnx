@@ -1,9 +1,11 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/SquadScout.App/SquadScout.App.csproj" />
+    <Project Path="src/SquadScout.AppHost/SquadScout.AppHost.csproj" />
     <Project Path="src/SquadScout.Broker/SquadScout.Broker.csproj" />
     <Project Path="src/SquadScout.Contracts/SquadScout.Contracts.csproj" />
     <Project Path="src/SquadScout.Functions/SquadScout.Functions.csproj" />
+    <Project Path="src/SquadScout.ServiceDefaults/SquadScout.ServiceDefaults.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/SquadScout.App.Tests/SquadScout.App.Tests.csproj" />

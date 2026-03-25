@@ -1,8 +1,9 @@
-﻿using SquadScout.App.Configuration;
+using SquadScout.App.Configuration;
 using SquadScout.App.Infrastructure;
 using SquadScout.App.Navigation;
 using SquadScout.App.Services;
 using SquadScout.App.ViewModels;
+using Microsoft.Extensions.Hosting;
 
 namespace SquadScout.App;
 
@@ -11,6 +12,7 @@ public static class MauiProgram
 	public static MauiApp CreateMauiApp()
 	{
 		var builder = MauiApp.CreateBuilder();
+		builder.AddServiceDefaults();
 		builder
 			.UseMauiApp<App>()
 			.ConfigureFonts(fonts =>
@@ -31,11 +33,13 @@ public static class MauiProgram
 		builder.Services.AddSingleton(authOptions);
 		builder.Services.AddSingleton(messagingOptions);
 		builder.Services.AddSingleton(localDevelopmentOptions);
-		builder.Services.AddSingleton(new HttpClient
+		builder.Services.AddHttpClient("BrokerApi", client =>
 		{
-			BaseAddress = AppConfiguration.CreateBrokerBaseUri(brokerApiOptions),
-			Timeout = TimeSpan.FromSeconds(Math.Max(1, brokerApiOptions.RequestTimeoutSeconds))
+			client.BaseAddress = AppConfiguration.CreateBrokerBaseUri(brokerApiOptions);
+			client.Timeout = TimeSpan.FromSeconds(Math.Max(1, brokerApiOptions.RequestTimeoutSeconds));
 		});
+		builder.Services.AddSingleton(serviceProvider =>
+			serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient("BrokerApi"));
 		builder.Services.AddSingleton<IAppNavigator, ShellNavigator>();
 		builder.Services.AddSingleton<IAuthenticationService, ConfiguredAuthenticationService>();
 		builder.Services.AddSingleton<IMessageConnectionService, MessagingConnectionService>();
