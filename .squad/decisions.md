@@ -1,5 +1,10 @@
 # Decisions
 
+## 2026-03-25
+
+- Accepted: PR #46 (Aspire / ServiceDefaults Revision) — Real Aspire entrypoint with AppHost orchestration, ServiceDefaults multi-target (net8.0;net10.0), preserved broker /health, integrated logging/resilience across Functions, Broker, and MAUI. Approved by Switch; merge-watch active. GitHub checks absent; merge risk low based on local validation (build ✅, tests 55/55 ✅, AppHost smoke ✅, broker /health ✅).
+- Accepted: Issue #13 Revision — Stop-Failure Recovery Serialization. Keep existing stop/input shared gate design. Require stop-failure recovery to reacquire `StopInputGate` before clearing `_stopRequested`. Preserves post-accept stop/input serialization invariant on both success and failure paths. Deterministic regression test added: `StopAsyncFailureUnderTerminateThrowReopensInputAfterGateReacquisition`. Validated by Seraph (build ✅, focused tests ✅, full suite ✅, commit `27aa9e1`). Ready for final re-review by Switch.
+
 ## 2026-03-24
 
 - Accepted: This repository uses a persistent Squad team with Matrix-themed agent names.
@@ -311,6 +316,76 @@ Ryan asked Neo to turn the full ordered local backlog into real GitHub issues in
 | #17 | #17 | Phase 1 Session Telemetry & Replay Diagnostics |
 | #18 | #18 | Orleans Silo Host & SQLite Bootstrap |
 | #19 | #19 | Session Grain & Durable Replay State |
+
+## User Directives — 2026-03-24T22:25:35Z
+
+**From Ryan Graham (via Copilot)**
+
+- **Accepted:** Ensure PRs are merged in a way that minimizes merge conflicts.
+
+## PR Merge Watcher — PR #42 & #41 (2026-03-24–2026-03-25)
+
+**Owner:** Morpheus & Seraph  
+**Task:** Explicitly watch PR #41 and #42 for clean merge conditions
+
+### PR #42 Status
+
+**Title:** Implement issue #8 safety baseline  
+**Issue Closed:** #8  
+**Merge Timestamp:** 2026-03-24T22:28:52Z  
+**Merge Commit:** 7d9c3c7  
+
+**Merge Strategy:** Squash merge  
+**Rationale:** Single logical unit, minimize main history clutter, reduce downstream merge conflict surface
+
+**Verification:** ✅ Issue #8 auto-closed on merge; build and broker tests passed
+
+### PR #41 Status
+
+**Title:** Implement Azure Function negotiate endpoint  
+**Issue Closed:** #7  
+**Merge Timestamp:** 2026-03-24T18:30:09Z  
+**Merge Commit:** 377581a  
+
+**Merge Strategy:** Standard commit merge (preserve history)  
+**Rationale:** Single logical commit, readable linear history, aligns with rebase-first conflict-minimization philosophy
+
+**Verification:** ✅ Issue #7 auto-closed on merge; no follow-up fixes required
+
+**Key Pattern Locked:** Session group naming `session:{projectId}:{sessionId}[:brokerId]`, managed-identity token flow, localhost dev fallback
+
+## Wave 1 Launch Validation & Phase Routing (2026-03-25)
+
+**Lead:** Neo  
+**Status:** Approved for execution
+
+### Issue #1 Reconciliation
+
+All deliverables shipped to main (commit `228c0c1`):
+- Multi-project solution structure (`.sln` + `.slnx`)
+- MAUI app baseline (all platforms: iOS, macOS Catalyst, Android, Windows)
+- Broker host skeleton with DI and configuration
+- Contracts project with shared message types
+- Azure Functions baseline with `NegotiateFunction` stub
+- Test project scaffold (`SquadScout.Broker.Tests`)
+- Directory build props & .NET 10 configuration
+
+**Decision:** Close issue #1 with reference to shipped commit `228c0c1` and PR #35
+
+### Wave 1 Branches Ready
+
+| Issue | Branch | Owner | Status | Merge Base |
+|-------|--------|-------|--------|-----------|
+| #6 | `squad/6-broker-relay-pipeline` | Seraph | Ready | `6d2160f` |
+| #7 | `squad/7-azure-function-negotiate-endpoint` | Trinity | Ready → Merged | `6d2160f` |
+| #8 | `squad/8-input-sanitization-secret-safe-logging` | Morpheus | Ready → Merged | `6d2160f` |
+| #9 | `squad/9-maui-app-shell-scaffolding` | Trinity | Ready → In Review (PR #43) | `6d2160f` |
+
+**Execution Plan:** Phase 1B — Broker & Azure Integration (Issues #6–#9, parallel execution)
+
+**Integration gate:** Issue #16 (E2E integration test) must pass before Phase 2 (Orleans grains & reconnect)
+
+**Decision:** Approved. Launch wave 1 for parallel execution.
 | #20 | #20 | Project Grain & State Migration Path |
 | #21 | #21 | Reconnect & Replay Resume Flow |
 | #22 | #22 | Heartbeat & Liveness Model |
@@ -425,3 +500,282 @@ The implementation fully satisfies the acceptance bar.
 
 **Status:** Accepted (implemented and approved by Switch).
 
+## Switch — Issue #9 MAUI App Shell Scaffolding Review (2026-03-25)
+
+**Reviewer:** Switch  
+**Artifact:** PR #43 `squad/9-maui-app-shell-scaffolding`  
+**Requested by:** Ryan Graham
+
+**Verdict:** APPROVED
+
+### Validation
+
+- ✅ `dotnet build .\SquadScout.slnx -nologo`
+- ✅ `dotnet test .\SquadScout.slnx -nologo --no-build`
+- ✅ `dotnet test .\SquadScout.slnx -nologo` (36/36 tests passing; SquadScout.App builds for Windows and Android during test run)
+
+### Findings
+
+- MAUI shell scaffolding meets product intent: project-selection and active-session routes, auth/messaging/project-catalog/session-lifecycle seams registered.
+- Development config supports seeded projects and offline pending sessions (reviewable before broker datapath online).
+- App-shell test project validates fallback/state logic without resizetizer pull into test assembly.
+- **Regression clear:** No duplicate `appicon.svg` output regression; appicon/resizetizer test path now passes.
+
+### Review Decision
+
+Approved for merge. Deliverable complete: MAUI app shell ready for Phase 2 Orleans integration.
+
+**Next:** Trinity monitors merge CI and post-merge build health. Ready to advance to next workstream.
+
+## Trinity — Merge Watch Issue #9 (PR #43) (2026-03-25)
+
+**Role:** Merge watcher  
+**Artifact:** PR #43 `squad/9-maui-app-shell-scaffolding` → `main`
+
+**Assignment:** Switch approved PR #43; Trinity monitors merge completion and validates main branch health.
+
+**Watch scope:**
+- Pre-merge CI validation
+- Post-merge build: `dotnet build .\SquadScout.slnx -nologo`
+- Post-merge tests: `dotnet test .\SquadScout.slnx -nologo`
+- Regression monitoring: appicon/resizetizer, shell navigation
+
+**Decision gate:** If post-merge CI or validation fails, escalate to Neo for rollback vs. revision decision. If all validation passes, record successful closure of issue #9 and advance team to next workstream (Phase 2 Orleans grains or queued backlog).
+
+**Status:** Active — waiting for merge trigger.
+
+## Link — Issue #13 Broker Session Start/Stop Endpoints (2026-03-25)
+
+**Owner:** Link  
+**Branch:** `squad/13-broker-session-start-stop-endpoints`  
+**Commit:** bb59652  
+**PR:** #44 (closes #13)  
+
+### Decision
+
+Expose broker session lifecycle as:
+- **POST /api/sessions/start** — `StartSessionCommand` with `projectId`, `sessionId` (client-provided), request metadata
+- **POST /api/sessions/{sessionId}/stop** — `StopSessionCommand` with required `projectId` repeat (explicit project binding confirmation)
+
+Broker error codes:
+- **404:** `project_not_found`, `session_not_found`
+- **409:** `project_repository_root_missing`, `project_repository_root_not_found`, `session_project_mismatch`, `session_already_stopped`, `session_not_started`, `session_not_active`, `session_stop_in_progress`
+
+### Rationale
+
+- Repeating `projectId` on stop makes session-to-project binding explicit and prevents accidental cross-project teardown (important for future client integration).
+- Failing bad start requests before session creation avoids orphaned pending sessions and gives callers cleaner remediation paths.
+- Session lifecycle remains owned by the existing PTY event pump (`Exited` → `SessionLifecycle` envelope); no parallel stop-state machine.
+- Actionable error codes enable future relay/auth work without endpoint shape changes.
+
+### Validation
+
+- ✅ Build: green
+- ✅ Tests: 55/55 passing
+- ✅ PR #44 open with handoff notes
+
+### Follow-up
+
+If mobile UX later needs a visible "stopping" phase, add that as a separate contract change rather than overloading the current `SessionState` enum.
+
+**Status:** Handoff complete. Awaiting Switch formal review on PR #44.
+
+## Switch — Issue #31 Review Gate: Aspire / ServiceDefaults (2026-03-25T00:08:17Z)
+
+**Owner:** Switch  
+**Artifact:** Seraph's Aspire / ServiceDefaults revision (issue #31)  
+**Verdict:** REJECTED  
+
+**Blocking Findings:**
+
+1. **No PR exists** — No GitHub pull request was opened for Aspire / ServiceDefaults scope.
+2. **No implementation** — Named worktree (`seraph/issue-31-aspire-service-defaults`) at `D:\GitHub\SquadScout\.worktrees\seraph-issue-31-aspire-service-defaults` contains no diff from `origin/main`, no `AppHost` project, no `ServiceDefaults` project.
+3. **No Aspire wiring** — No `DistributedApplication`, `AddServiceDefaults()`, `UseServiceDefaults()`, or `MapDefaultEndpoints()` integration in Broker, Functions, or App hosts.
+4. **No reviewable handoff** — No Seraph implementation notes or validation report found in squad records.
+
+**Validation Performed:**
+- Baseline build/test on Seraph's named worktree: 55/55 tests pass (no regression).
+- Cross-project analysis: Broker (`Program.cs`), Functions (`Program.cs`), App (`MauiProgram.cs`) all use direct host registration with no shared OpenTelemetry or ServiceDefaults hooks.
+
+**Merge-Risk Context:**
+- Target scope spans three host models: MAUI (`net10.0` multi-target), Broker (`net10.0` web), Functions (`net8.0` isolated worker).
+- Any acceptable revision must demonstrate explicit compatibility and cross-project integration strategy for Aspire before review can proceed.
+
+**Revision Assignment:**
+- **Next owner:** Link (local host / orchestration / solution-structure expertise by routing)
+- **Rationale:** Link owns host-level changes and solution structure; best fit for introducing AppHost scaffolding and cross-project ServiceDefaults wiring.
+- **Seraph lockout:** Blocked from next revision cycle for this artifact.
+- **New worktree:** `D:\GitHub\SquadScout-31-link`
+- **New branch:** `squad/31-aspire-service-defaults-revision`
+
+
+
+## Decision: Issue #13 / PR #44 Rejection — Switch Review (2026-03-25)
+
+**Reviewer:** Switch  
+**Verdict:** REJECTED  
+**Artifact:** PR #44 — \squad/13-broker-session-start-stop-endpoints\  
+
+### Blocking Findings
+
+1. **Stop/input handoff not serialized** — Lifecycle race condition persists. InMemorySessionRelay.cs:163-173 checks IsStopRequested once then hands off to AcceptClientMessageAsync(); InMemorySessionRelay.cs:107-121 sets stop flag but never coordinates with ClientMessageGate. Result: input can slip through after stop acceptance in the exact area this review was asked to harden.
+
+2. **Stop-in-flight input rejection returns unstructured 409** — Inconsistent with established SessionControlException contract for other session-control errors. Bare InvalidOperationException thrown in InMemorySessionRelay.cs:164-166 maps to unstructured \{ message = ... }\ instead of structured payload with \code\, \sessionId\, \projectId\, \state\. Missing machine-readable error code and test coverage (concurrent stop/input overlap not covered).
+
+### Resolution
+
+- **Reassigned to:** Morpheus
+- **Reason:** Link authored; rotating reviewer for correction cycle.
+- **Lockout:** Link locked out for this revision on issue #13.
+- **Branch:** \squad/13-broker-session-start-stop-endpoints\
+- **Ready-for-approval:** (1) Serialize stop and input acceptance; (2) Return structured lifecycle conflict for stop-in-flight input rejection; (3) Add focused test coverage for concurrent stop/input scenarios.
+
+
+## Decision: Aspire / ServiceDefaults Revision — Link Implementation (2026-03-25)
+
+# Link — Aspire revision decision
+
+## Context
+
+Issue #31's prior Aspire artifact was rejected because it did not hand off a real implementation. This revision needed a clean, Link-owned implementation that respected the existing framework split: broker + MAUI on `net10.0`, Azure Functions isolated worker on `net8.0`.
+
+## Decision
+
+- Use one shared `src\SquadScout.ServiceDefaults` project, but multi-target it to `net8.0;net10.0`.
+- Keep the shared defaults focused on cross-app concerns that work for all three app types: OpenTelemetry logging/tracing/metrics exporters, service discovery registration, and default HttpClient resilience wiring.
+- Keep ASP.NET Core-specific health checks and inbound request instrumentation in `src\SquadScout.Broker` instead of forcing `Microsoft.AspNetCore.App` into the MAUI build graph.
+- Orchestrate the backend services with `src\SquadScout.AppHost` using `AddProject<...>("broker")` and `AddAzureFunctionsProject<...>("functions")`.
+- Register the MAUI client in AppHost with `AddMauiProject(...).AddWindowsDevice()` and feed the broker base URL through Aspire-managed environment/config instead of treating the MAUI app as a normal server resource.
+
+## Rationale
+
+This keeps the revision cohesive and close to current Aspire ecosystem guidance while avoiding the two biggest compatibility traps in this repo: Functions isolated-worker startup and MAUI's non-server deployment model. It also preserves current broker behavior by keeping `/health` stable and only layering observability/orchestration concerns around the existing endpoints.
+
+
+## Decision: Issue #12 Token Validation Review — Switch Approval (2026-03-25)
+
+**Verdict:** APPROVED
+
+# Switch Review — Issue #12 / PR #45
+
+- **Verdict:** **APPROVED**
+- **Artifact reviewed:** PR #45 / branch `squad/12-token-validation-session-claims-hardening` at commit `5e7f232`
+- **Validation run:** `dotnet build .\SquadScout.slnx -nologo`, focused `dotnet test .\tests\SquadScout.Broker.Tests\SquadScout.Broker.Tests.csproj -nologo --filter PubSubNegotiateEndpointTests --no-build`, and `dotnet test .\SquadScout.slnx -nologo --no-build` all passed in `D:\GitHub\SquadScout-12` (14/14 focused, 61/61 full).
+
+## Review Read
+
+- Easy Auth headers now fail closed outside the Azure Functions host boundary; localhost development identity remains the only non-Easy-Auth path and does not accept spoofed Easy Auth headers.
+- Header/payload tampering is rejected when the trusted principal headers and decoded Easy Auth payload disagree on principal id or identity provider.
+- Client negotiate requests can no longer self-assert `brokerId`; only broker-scoped requests may carry that segment.
+- PubSub `userId` values are now scoped to participant + project + session + optional broker + principal, which keeps session isolation coherent with the `session:{projectId}:{sessionId}[:brokerId]` group contract.
+- The public negotiate response no longer echoes principal details, roles, or auto-join groups, and there is no checked-in downstream consumer that depends on the removed fields.
+
+## Merge-Risk Notes
+
+- No GitHub check runs are configured on PR #45 right now, so merge confidence is based on the local build/test evidence above.
+- Coverage is targeted and unit-focused; no live Azure Web PubSub integration probe exists yet, so first deployment should watch for environment-specific token issuance behavior.
+
+
+## Switch — Issue #12 Review Gate: Token Validation & Session Claims Hardening (2026-03-25T00:28:54Z)
+
+**Owner:** Switch  
+**Artifact:** Morpheus's Token Validation & Session Claims Hardening (issue #12)  
+**Verdict:** APPROVED  
+
+### Review Summary
+
+- **PR:** #45 (squad/12-token-validation-session-claims-hardening at commit 5e7f232)
+- **Validation:** Build green, focused tests 14/14 (PubSubNegotiateEndpointTests), full tests 61/61
+- **Security Review:** Passes closed Easy Auth handling, header tampering rejection, broker ID scoping, session isolation coherence, response hygiene
+
+### Key Findings
+
+1. **Easy Auth Isolation:** Fails closed outside Azure Functions host boundary; localhost dev path does not accept spoofed Easy Auth headers.
+2. **Header/Payload Tampering:** Trusted principal headers and decoded Easy Auth payload agreement verified; disagreement triggers rejection.
+3. **Broker ID Scoping:** Client negotiate requests cannot self-assert brokerId; only broker-scoped requests may carry segment.
+4. **Session Isolation:** PubSub userId scoped to participant + project + session + optional broker + principal, maintaining session:{projectId}:{sessionId}[:brokerId] group contract coherence.
+5. **Response Hygiene:** Public negotiate response no longer echoes principal details, roles, or auto-join groups; no checked-in downstream consumers depend on removed fields.
+
+### Merge-Risk Assessment
+
+**Risk Level:** LOW
+
+**Caveats:** GitHub check runs not configured (merge confidence based on local build/test evidence). Unit/local validation only; first deployment should monitor environment-specific token issuance behavior.
+
+### Decision
+
+**PR #45 APPROVED for merge.** Morpheus activated for merge-watch.
+
+**Status:** Ready for main branch merge.
+
+## Switch — Issue #13 Re-Review Gate: Broker Session Lifecycle Stop Controls (2026-03-25T00:48:45Z)
+
+**Owner:** Switch
+**Artifact:** Morpheus's Broker Session Lifecycle Stop Controls (issue #13, second revision)
+**Verdict:** REJECTED
+
+# Issue #13 Re-review Decision — 2026-03-25
+
+## Verdict
+**REJECTED**
+
+## Artifact Reviewed
+- **PR:** rjygraham/SquadScout#44
+- **Title:** Implement broker session lifecycle stop controls
+- **Branch:** `squad/13-broker-session-start-stop-endpoints`
+- **Commit:** `b01f1683d196726a590cd12b47619d764ca9804a`
+
+## Validation Evidence
+- `dotnet build .\SquadScout.slnx -nologo` ✓
+- `dotnet test .\SquadScout.slnx -nologo --no-build --filter "FullyQualifiedName~SessionRelayPipelineTests"` ✓ (9/9)
+- `dotnet test .\SquadScout.slnx -nologo --no-build` ✓ (60/60)
+
+## What Improved
+- Stop-path input rejection now returns the structured lifecycle conflict contract: `session_stop_in_progress`.
+- `StopAsync(...)` and `RelayInputAsync(...)` now share `StopInputGate`, and the new gated PTY test proves the happy-path overlap deterministically.
+
+## Blocking Findings
+1. **Stop failure recovery re-opens the exact accepted-stop race.**  
+   In `src\SquadScout.Broker\Relay\InMemorySessionRelay.cs`, `StopAsync(...)` accepts stop under `StopInputGate`, but if `TerminateAsync()` throws while the PTY is still running, the catch block calls `ResetStopRequest()` at line 133 after the gate has already been released. A later `RelayInputAsync(...)` call can then acquire the same gate, observe `IsStopRequested == false`, and still reach `WriteAsync(...)` even though stop had already been accepted. That means blocker #1 is not fully fixed; the invariant only holds on the successful-stop path.
+
+2. **The new deterministic regression path does not cover the failing-stop branch that still violates the lifecycle guarantee.**  
+   `tests\SquadScout.Broker.Tests\SessionRelayPipelineTests.cs` adds `StopAsyncSerializesWithAcceptedInputAndReturnsStructuredConflictForLaterInput`, but it exercises only the successful termination path. There is still no deterministic test for `TerminateAsync()` failure / `session_stop_failed` overlap, so the remaining accepted-stop race above is not trapped by the suite.
+
+## Next Revision Owner
+- **Recommended next reviser:** Seraph
+- **Reason:** Link authored the original rejected revision and Morpheus authored this rejected correction. Per reviewer lockout, the next pass should move to a third agent. Seraph is the best fit for session lifecycle/state-transition hardening.
+
+## Reviewer Note
+This is close: blocker #2 from the prior rejection is fixed, and the deterministic gate-based test approach is the right pattern. The remaining problem is narrow but still merge-blocking because it reintroduces post-accept stop/input leakage through the stop-failure recovery path.
+
+
+## Seraph — PR #44 Merge Decision (2026-03-25)
+
+**Date:** 2026-03-25  
+**PR:** #44 — squad/13-broker-session-start-stop-endpoints  
+**Owner:** Seraph  
+**Verdict:** EXECUTED / MERGED
+
+### Decision
+
+Reconcile PR #44 by rebasing it onto current main, then squash-merge once GitHub reports the PR clean again.
+
+### Rationale
+
+- GitHub showed mergeable_state: dirty because main had advanced with #45 and #46 after the approved issue #13 fix was prepared.
+- The approved behavior to preserve was the broker stop/start lifecycle hardening, especially the shared stop/input gate and stop-failure recovery serialization.
+- Rebase was the lowest-risk reconciliation because the branch was short, linear, and merged cleanly with the newer broker bootstrap changes already on main.
+- Squash merge kept downstream history tidy and minimized extra merge-noise once the branch had already been rebased onto the latest base.
+
+### Validation Used After Reconciliation
+
+- dotnet build .\SquadScout.slnx -nologo ✅
+- dotnet test .\tests\SquadScout.Broker.Tests\SquadScout.Broker.Tests.csproj -nologo --filter "FullyQualifiedName~SessionRelayPipelineTests" ✅
+- dotnet test .\SquadScout.slnx -nologo --no-build ✅
+
+### Outcome
+
+- PR #44 rebased cleanly onto main
+- Validation passed after reconciliation
+- PR #44 merged successfully
+- Issue #13 closed via the merged PR

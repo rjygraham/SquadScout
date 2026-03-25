@@ -25,6 +25,9 @@
     <Compile Include="..\..\src\SquadScout.App\Configuration\AppConfiguration.cs" Link="App\Configuration\AppConfiguration.cs" />
     <Compile Include="..\..\src\SquadScout.App\Services\ServiceContracts.cs" Link="App\Services\ServiceContracts.cs" />
     <Compile Include="..\..\src\SquadScout.App\Services\BrokerBackedMobileServices.cs" Link="App\Services\BrokerBackedMobileServices.cs" />
+    <Compile Include="..\..\src\SquadScout.App\Services\PubSubNegotiationClient.cs" Link="App\Services\PubSubNegotiationClient.cs" />
+    <Compile Include="..\..\src\SquadScout.App\Services\WebPubSubSocketClient.cs" Link="App\Services\WebPubSubSocketClient.cs" />
+    <Compile Include="..\..\src\SquadScout.App\Services\MessagingConnectionService.cs" Link="App\Services\MessagingConnectionService.cs" />
   </ItemGroup>
 
 </Project>

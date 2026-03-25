@@ -85,3 +85,11 @@
 - **Git commit:** `.squad/` directory staged and committed.
 - **Status:** All scribe tasks complete. Team has full visibility into GitHub issues import and label routing pattern.
 
+### 2026-03-25 — Wave 1 Launch Validation Complete
+
+- **Issue #1 reconciliation:** Solution & Project Scaffolding landed fully on main (commit `228c0c1`, PR #35). All scaffolding deliverables verified: multi-project structure, MAUI platforms (iOS, macOS, Android, Windows), broker DI skeleton, contracts, functions, tests, .NET 10 config.
+- **Wave 1 branches clean:** All four issue #6–#9 branches rebased on main tip (`6d2160f`, after issue #5 merged). No conflicts, collision-free file edits. Ready for parallel execution.
+- **Phasing locked:** Phase 1A (scaffold + contract + replay + PTY mock + real PTY host) complete on main. Phase 1B (relay + functions + security + MAUI UI) staged in wave 1 branches. Phase 1 gate (#16, E2E integration test) will activate after wave 1 merges.
+- **Team routing confirmed:** Seraph (#6), Trinity (#7), Morpheus (#8), Link (#9) have branches staged with no surprises.
+- **Key learning:** Staged branches maintained clean rebase discipline during Phase 1A. All downstream work dependencies were satisfied before branch creation, so no rebasing churn needed. Recommendation: maintain this pattern for Phase 2 (Orleans grains will be staged against Phase 1B completion).
+

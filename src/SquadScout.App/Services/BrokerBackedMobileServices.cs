@@ -30,48 +30,6 @@ public sealed class ConfiguredAuthenticationService : IAuthenticationService
     }
 }
 
-public sealed class MessagingConnectionService : IMessageConnectionService
-{
-    private readonly MessagingOptions _messagingOptions;
-
-    public MessagingConnectionService(MessagingOptions messagingOptions)
-    {
-        _messagingOptions = messagingOptions;
-        CurrentStatus = CreateDisconnectedStatus();
-    }
-
-    public MessageConnectionStatus CurrentStatus { get; private set; }
-
-    public Task<MessageConnectionStatus> PrepareForSessionAsync(SessionDescriptor session, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        CurrentStatus = _messagingOptions.AutoPrepareOnSessionStart
-            ? new MessageConnectionStatus(
-                MessageConnectionState.Ready,
-                $"Messaging composition is ready for session '{session.SessionId}'. Live Azure Web PubSub attachment lands in #11.",
-                _messagingOptions.Hub,
-                SupportsLiveSessionStream: false)
-            : CreateDisconnectedStatus();
-
-        return Task.FromResult(CurrentStatus);
-    }
-
-    public Task<MessageConnectionStatus> ResetAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        CurrentStatus = CreateDisconnectedStatus();
-        return Task.FromResult(CurrentStatus);
-    }
-
-    private MessageConnectionStatus CreateDisconnectedStatus() =>
-        new(
-            MessageConnectionState.Disconnected,
-            $"Messaging is scaffolded for hub '{_messagingOptions.Hub}' and remains disconnected until #11.",
-            _messagingOptions.Hub,
-            SupportsLiveSessionStream: false);
-}
-
 public sealed class BrokerProjectCatalogService : IProjectCatalogService
 {
     private readonly Func<HttpClient> _createHttpClient;

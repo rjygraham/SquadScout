@@ -167,4 +167,115 @@
   - Dependencies: Pty.Net added, broker DI updated, appsettings configured
 - **Phase 1 Unblocked:** This approval unblocks Issue #6 (Broker Relay Pipeline) to proceed with translating real PTY events into relay publication.
 
+### Issue #9 Formal Review — APPROVED (2026-03-24)
 
+- **Artifact reviewed:** PR #43 / branch `squad/9-maui-app-shell-scaffolding` at commit `84d7300`
+- **Verdict:** **APPROVED**
+- **Validation:** `dotnet build .\SquadScout.slnx -nologo`, `dotnet test .\SquadScout.slnx -nologo --no-build`, and the previously failing `dotnet test .\SquadScout.slnx -nologo` all passed in `D:\GitHub\SquadScout-9` (36/36 tests on the full solution).
+- **Reviewer read on scope:** The shell now has the intended single-user flow (`projects` → `active-session`), app-side composition points are registered for auth/messaging/project/session seams, and Development settings provide a stable offline review path without reshaping the host.
+- **Key regression callout:** The MAUI app icon/resizetizer failure did not reproduce; the full `dotnet test .\SquadScout.slnx -nologo` run built `SquadScout.App` for Windows and Android successfully, so issue #9 no longer blocks on duplicate `appicon` output.
+- **Testing pattern worth preserving:** `tests\SquadScout.App.Tests\SquadScout.App.Tests.csproj` links app configuration/service source files into a plain `net10.0` test project. That keeps the fallback/state logic testable without reintroducing MAUI resource build conflicts.
+- **Merge-risk note:** Coverage is strongest around fallback services and active-session state updates, not page-level UI automation. That is acceptable for this scaffolding issue because the navigation/state seams are now in place and the full solution build remains green.
+
+### Issue #9 Review Completion — Handoff to Trinity (2026-03-25)
+
+- **Timestamp:** 2026-03-25T23:57:15Z
+- **Review scope:** PR #43 final approval gate and merge-watch handoff
+- **Validation performed:** Three-command test suite on `D:\GitHub\SquadScout-9` (build, test-no-build, test-full)
+- **All pass verdicts:** `dotnet build .\SquadScout.slnx -nologo`, `dotnet test .\SquadScout.slnx -nologo --no-build`, `dotnet test .\SquadScout.slnx -nologo` (36/36)
+- **Appicon/resizetizer regression:** **Clear** — no duplicate output detected during full test run. Windows and Android MAUI builds exercise successfully.
+- **Design confidence:** Shell nav/state seams are wired. Auth, messaging, project, session lifecycle composition points registered. Dev config supports reviewable offline path.
+- **Verdict:** **APPROVED** — Ready for immediate merge.
+- **Handoff:** Orchestration logs written. Decisions merged. Trinity picks up merge-watch for CI/post-merge validation and regression monitoring.
+- **Status:** Phase 1 Wave 1 Issue #9 complete. Advance team to next workstream (PR merge and Phase 2 Orleans integration setup).
+
+### Aspire / ServiceDefaults Review Gate — REJECTED (2026-03-25T00:05:25Z)
+
+- **Requested scope:** Add .NET Aspire orchestration and ServiceDefaults across the solution plus `SquadScout.App`, `SquadScout.Broker`, and `SquadScout.Functions`.
+- **Handoff result:** No valid Seraph handoff existed. No PR was opened, no acceptable handoff report was recorded, and the local worktree `seraph/issue-31-aspire-service-defaults` was a clean copy of `origin/main` with zero code diff.
+- **Validation run anyway:** `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` both passed in `D:\GitHub\SquadScout\.worktrees\seraph-issue-31-aspire-service-defaults` (55/55 tests).
+- **Concrete blockers:** no `AppHost` project, no `ServiceDefaults` project, no Aspire/service-discovery/OpenTelemetry wiring in broker or functions startup, no MAUI-side integration point, and no reviewable diff for solution-structure changes.
+- **Tracking inconsistency:** the branch name references issue `#31`, but GitHub issue `#31` is currently structured logging/correlation IDs, not Aspire / ServiceDefaults.
+- **Revision owner recommendation:** Link should own the next revision because the missing work is primarily solution/orchestration scaffolding; Seraph is locked out for the next revision cycle on this artifact.
+
+### Issue #12 Token Validation & Session Claims — Morpheus Complete (2026-03-25T00:20:09Z)
+
+**Status:** Implementation complete. Token validation middleware and session claims hardening integrated. PR #45 opened (closes #12). Ready for Switch formal review gate.
+
+**Morpheus Deliverables:**
+- `src\SquadScout.Broker\Middleware\TokenValidationMiddleware.cs` — Bearer token extraction, validation, expiration enforcement
+- `src\SquadScout.Broker\Services\SessionClaimsValidator.cs` — Session claim verification, project ownership binding
+- Token lifecycle: extraction from HTTP headers, signature verification, expiration checks
+- Claims binding: project ownership, user context, immutability constraints
+- Broker authentication hardening integrated with session state machine
+- Full test coverage; all tests passing
+
+**Build & Test Status:**
+- ✅ Solution builds cleanly
+- ✅ All tests pass (baseline maintained)
+- ✅ Branch: `squad/12-token-validation-session-claims-hardening`
+- ✅ Commit: 5e7f232
+- ✅ PR: #45 (no conflicts, ready for review)
+
+**Handoff:** WS-2 token validation critical path. Morpheus awaits Switch formal review gate on PR #45. If revision needed, Link assumes ownership per team protocol.
+
+### Issue #13 Formal Review — REJECTED (2026-03-25)
+
+- **Artifact reviewed:** PR #44 / branch `squad/13-broker-session-start-stop-endpoints` at commit `bb59652`.
+- **Validation run:** `dotnet build .\SquadScout.slnx -nologo` passed, focused `SessionRelayPipelineTests` passed (8/8), and full solution tests passed (59/59).
+- **Blocking finding 1:** `InMemorySessionRelay.StopAsync(...)` and `RelayInputAsync(...)` do not share a serialization point. Input checks `IsStopRequested` before entering the orchestrator gate, so a request already in flight can still reach `WriteAsync(...)` after stop has been accepted.
+- **Blocking finding 2:** stop-related input rejection returns a generic 409 `{ message }` via `InvalidOperationException` instead of the new structured `SessionControlException` shape. That leaves future clients without a stable machine-readable lifecycle code for the "stopping" case.
+- **Coverage gap that matters:** `SessionRelayPipelineTests` prove completed-stop, already-exited, and project-mismatch behavior, but do not exercise stop-in-flight input rejection or concurrent stop overlap. For lifecycle work, happy-path stop coverage is not enough.
+- **Recommended next reviser:** Morpheus. Link authored the artifact and should sit out the next correction cycle.
+
+### Issue #12 Formal Review — APPROVED (2026-03-26)
+
+- **Artifact reviewed:** PR #45 / branch `squad/12-token-validation-session-claims-hardening` at commit `5e7f232`.
+- **Validation run:** `dotnet build .\SquadScout.slnx -nologo`, focused `PubSubNegotiateEndpointTests` (14/14), and full solution tests (61/61) all passed in `D:\GitHub\SquadScout-12`.
+- **Security read:** Easy Auth headers are only trusted inside the Functions host boundary, mismatched header/payload principals are rejected, client requests cannot self-assert `brokerId`, and PubSub `userId` values are session-scoped (`participant:project:session[:broker]:principal`).
+- **Contract read:** Negotiation response surface is tighter (no echoed principal details/roles/groups), and no checked-in client/broker consumer depends on the removed fields.
+- **Merge-risk note:** No GitHub checks are attached to PR #45 yet; confidence comes from local validation only.
+
+### Aspire / ServiceDefaults Revision — APPROVED (2026-03-25)
+
+- **Artifact reviewed:** PR #46 / branch `squad/31-aspire-service-defaults-revision` at commit `2c20bae`.
+- **Validation run:** `dotnet build .\SquadScout.slnx -nologo` passed, `dotnet test .\SquadScout.slnx -nologo --no-build` passed (55/55), and `dotnet run --project .\src\SquadScout.AppHost\SquadScout.AppHost.csproj --no-build` reached a healthy smoke start; broker `/health` returned `{"status":"ok"}` while AppHost was running.
+- **Compatibility pattern confirmed:** `src\SquadScout.ServiceDefaults` multi-targeting `net8.0;net10.0` is the right seam for sharing OpenTelemetry/logging and `HttpClient` defaults across Functions, Broker, and MAUI without forcing Functions onto `net10.0`.
+- **Critical orchestration seam confirmed:** `src\SquadScout.Broker\Program.cs` must only call `UseUrls(...)` when Aspire has not already injected `urls`; otherwise AppHost endpoint assignment is overridden and orchestration breaks.
+- **Reviewer verdict:** **APPROVED** — the replacement revision closes the prior "no implementation / no handoff" rejection and is ready for merge, with the usual note that no GitHub checks are attached yet.
+
+### PR #46 Merge Watch Handoff (2026-03-25T00:42:44Z)
+
+- **Transition:** Link assumes merge-watch active state for PR #46 (Aspire / ServiceDefaults Revision).
+- **Approval status:** Switch formal review APPROVED.
+- **Local validation summary:** Build ✅ | Tests 55/55 ✅ | AppHost smoke ✅ | Broker /health ✅.
+- **GitHub checks:** Absent; merge confidence based on local validation evidence.
+- **Merge strategy:** Standard squash or commit per squad policy.
+- **Link monitoring scope:** Main branch integration, post-merge CI/CD pipeline (if available), AppHost smoke validation post-merge.
+- **Escalation:** Rollback assessment if post-merge AppHost smoke fails or GitHub checks regression occurs.
+
+### Issue #13 Re-review — REJECTED (2026-03-25)
+
+- **Artifact reviewed:** PR #44 / branch `squad/13-broker-session-start-stop-endpoints` at commit `b01f168`.
+- **Validation run:** `dotnet build .\SquadScout.slnx -nologo` passed, focused `SessionRelayPipelineTests` passed (9/9), and full solution tests passed (60/60) in `D:\GitHub\SquadScout-13`.
+- **Confirmed fix:** stop-related input rejection now returns structured `SessionControlException` contract with code `session_stop_in_progress`, and the new gated PTY test proves the successful stop/input overlap path deterministically.
+- **Remaining blocker:** `InMemorySessionRelay.StopAsync(...)` still clears `_stopRequested` via `ResetStopRequest()` after `TerminateAsync()` failures without re-entering `StopInputGate`, so input can be admitted again after stop was already accepted if the PTY remains running.
+- **Coverage gap that matters:** the new deterministic regression test only covers successful stop completion; no failing-stop / `session_stop_failed` overlap test guards the remaining race.
+- **Recommended next reviser:** Seraph. Link authored the original rejected revision, Morpheus authored this rejected correction, so the next cycle should move to a third agent with lifecycle ownership.
+
+### Issue #13 Final Re-Review — APPROVED (2026-03-25)
+
+- **Artifact reviewed:** PR #44 / branch `squad/13-broker-session-start-stop-endpoints` at commit `27aa9e1`.
+- **Validation run:** `dotnet build .\SquadScout.slnx -nologo`, focused `SessionRelayPipelineTests` (10/10), and full solution tests (61/61) all passed in `D:\GitHub\SquadScout-13`.
+- **Race-condition read:** `InMemorySessionRelay.StopAsync(...)` now routes terminate-failure recovery through `ResetStopRequestAsync(...)`, which reacquires `StopInputGate` before clearing `_stopRequested`; `RelayInputAsync(...)` uses the same gate for admission, so accepted stop no longer reopens input on the failure path.
+- **Coverage read:** `SessionRelayPipelineTests` now prove both the successful accepted-stop overlap and the deterministic failing-stop overlap, including the `session_stop_failed` path staying blocked behind the shared gate before input can resume.
+- **Verdict:** **APPROVED** — reviewer blocker is closed. Remaining merge notes are operational only: GitHub has no configured checks on PR #44, and the PR currently reports `mergeable_state: dirty`, so merge should wait for branch reconciliation if needed.
+
+
+### PR #47 Review Kickoff (2026-03-25T01:22:48Z)
+
+- **Event:** PR #47 review activation with parallel Seraph merge-watch contingent on approval
+- **Requested by:** Ryan Graham
+- **Coordination:** Switch review → (on APPROVED) → Seraph merge-watch
+- **Scope:** Code quality, test coverage, build validation, merge readiness assessment
+- **Orchestration logs:** 2026-03-25T01-22-48Z-switch.md, 2026-03-25T01-22-48Z-seraph.md

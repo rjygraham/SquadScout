@@ -1,4 +1,6 @@
-﻿using SquadScout.Contracts.Projects;
+﻿using System.Text.Json;
+using SquadScout.Contracts.Messages;
+using SquadScout.Contracts.Projects;
 using SquadScout.Contracts.Sessions;
 
 namespace SquadScout.App.Services;
@@ -19,8 +21,11 @@ public enum SessionActivationSource
 public enum MessageConnectionState
 {
     Disconnected,
+    Connecting,
     Ready,
-    Connected
+    Connected,
+    Reconnecting,
+    Faulted
 }
 
 public sealed record ProjectCatalogSnapshot(
@@ -33,11 +38,49 @@ public sealed record ClientIdentity(
     string DisplayName,
     string Mode);
 
-public sealed record MessageConnectionStatus(
-    MessageConnectionState State,
-    string Summary,
-    string Hub,
-    bool SupportsLiveSessionStream);
+public sealed record MessageConnectionStatus
+{
+    public MessageConnectionState State { get; init; } = MessageConnectionState.Disconnected;
+
+    public string Summary { get; init; } = string.Empty;
+
+    public string Hub { get; init; } = string.Empty;
+
+    public bool SupportsLiveSessionStream { get; init; }
+
+    public string? ProjectId { get; init; }
+
+    public string? SessionId { get; init; }
+
+    public string? SessionGroup { get; init; }
+
+    public string? ConnectionId { get; init; }
+
+    public DateTimeOffset? ConnectedAtUtc { get; init; }
+
+    public DateTimeOffset? RefreshAtUtc { get; init; }
+
+    public int ReconnectAttempt { get; init; }
+
+    public string? FailureReason { get; init; }
+}
+
+public enum MessageTrafficDirection
+{
+    Incoming,
+    Outgoing
+}
+
+public sealed record MessageEnvelopeTraffic
+{
+    public MessageTrafficDirection Direction { get; init; }
+
+    public MessageEnvelope<JsonElement> Envelope { get; init; } = new();
+
+    public DateTimeOffset ObservedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+
+    public string Summary { get; init; } = string.Empty;
+}
 
 public sealed record SessionLaunchResult(
     SessionDescriptor Session,
@@ -63,9 +106,21 @@ public interface IAuthenticationService
 
 public interface IMessageConnectionService
 {
+    event EventHandler<MessageConnectionStatus>? StatusChanged;
+
+    event EventHandler<MessageEnvelopeTraffic>? TrafficObserved;
+
     MessageConnectionStatus CurrentStatus { get; }
 
+    IReadOnlyList<MessageEnvelopeTraffic> RecentTraffic { get; }
+
     Task<MessageConnectionStatus> PrepareForSessionAsync(SessionDescriptor session, CancellationToken cancellationToken = default);
+
+    Task<MessageConnectionStatus> ReconnectAsync(CancellationToken cancellationToken = default);
+
+    Task SendInputAsync(string content, CancellationToken cancellationToken = default);
+
+    Task SendEnvelopeAsync<TPayload>(MessageEnvelope<TPayload> envelope, CancellationToken cancellationToken = default);
 
     Task<MessageConnectionStatus> ResetAsync(CancellationToken cancellationToken = default);
 }
