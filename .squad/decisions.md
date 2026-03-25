@@ -789,3 +789,57 @@ Reconcile PR #44 by rebasing it onto current main, then squash-merge once GitHub
 - Validation passed after reconciliation
 - PR #44 merged successfully
 - Issue #13 closed via the merged PR
+
+## Neo — PR #53 Review: Issue #15 MAUI Project & Session UX Polish (2026-03-25)
+
+**Date:** 2026-03-25
+**Reviewer:** Neo (Lead)
+**Verdict:** APPROVE — safe to merge.
+
+### Summary
+
+PR #53 delivers the single-session, native chat-like mobile flow required by Issue #15 and the accepted user directives. Build succeeds with 0 warnings; all 78 tests pass.
+
+### Key Approvals
+
+#### 1. Single-Session Native Chat Flow ✅
+
+The UX enforces the accepted strict single-session handoff:
+- CanStartSession requires !HasActiveSession && SelectedProject is not null && HasCatalogEntry(SelectedProject).
+- When a session is in focus, the project page shows resume-first affordances and disables "Start session."
+- The ActiveSessionPage implements a chat-style transcript with bubble messages, composer bar, and proper empty/banner states.
+- Aligns with the Trinity decision: "Treat the MAUI flow as a strict single-session handoff."
+
+#### 2. Loading / Empty / Retry / Stale-Selection / Resume / No-Session ✅
+
+All six state categories are coherently handled:
+- **Loading:** IsRefreshing + IsBusy flags disable all commands during project fetch.
+- **Empty:** ProjectsStateTitle + ProjectsStateDescription show actionable guidance. Empty catalog clears selection.
+- **Retry:** Error state preserves any existing project list; refresh re-enables after failure.
+- **Stale-selection:** SelectionWarningMessage covers three cases (different project vs. active, active project missing from catalog, selected project missing). HasCatalogEntry blocks starting stale projects.
+- **Resume/Start gating:** Mutually exclusive — resume requires HasActiveSession, start requires !HasActiveSession. Both require !IsBusy.
+- **No-session:** Transcript empty state with navigation hint back to projects.
+
+#### 3. Test Coverage ✅
+
+9 focused acceptance tests across 2 test classes cover the UX state machine:
+- **ProjectSelection (4):** Loading flow, empty catalog, retry after failure, active session resume + navigation.
+- **ActiveSession (5):** No-session empty state, broker-pending banners + composer gating, refresh-clears-missing-session, reconnect fault reporting, dev-fallback offline mode.
+- Test doubles (ScriptedProjectCatalogService, RecordingNavigator, etc.) are well-structured and reusable.
+- AsyncAssert.WaitForAsync properly handles async state transitions.
+
+#### 4. Architecture & Cross-Cutting ✅
+
+- SessionTranscriptController is a clean projection seam — pure business logic, no MAUI dependencies, testable.
+- Test project uses <Compile Include> links to avoid MAUI SDK dependency — effective pattern.
+- ViewModelTestDoubles.cs shadows MainThread for test isolation.
+- Singleton VM lifetime makes event unsubscription unnecessary.
+
+### Minor Observations (Non-Blocking)
+
+- **Latent thread-safety inconsistency:** ProjectSelectionViewModel subscribes to _activeSessionState.Changed without MainThread marshaling (line 56), unlike ActiveSessionViewModel.StatusChanged (line 63). Currently safe because Changed is only fired from UI-thread command handlers. Worth harmonizing in a future cleanup pass.
+- **No stale-selection warning test:** The three SelectionWarningMessage branches are logic-complete but don't have dedicated test coverage. Consider adding in a follow-up.
+
+### Decision
+
+**APPROVE merge.** The PR satisfies Issue #15's requirements, aligns with all accepted user directives, introduces no regressions, and the architecture is clean for future reconnect/voice extensions.

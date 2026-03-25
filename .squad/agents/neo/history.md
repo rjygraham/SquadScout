@@ -101,3 +101,23 @@
 - **Routing:** Issue #51 assigned to Seraph (Cloud/Auth Dev) with phase:1 label; coordinate with AppHost/Aspire for managed identity if used.
 - **Pattern observed:** PR-review-found security gaps are surfaced as mandatory follow-ups before public exposure. This is the correct gate; include signature validation as part of Phase 1 security baseline (WS-6).
 
+### 2026-03-25 — PR #53 Review: Issue #15 MAUI UX Polish — APPROVED
+
+- **Verdict:** APPROVE. PR #53 (Issue #15) merged cleanly, all 78 tests pass, 0 build warnings.
+- **UX alignment:** Single-session handoff, resume-first affordances, chat-style transcript, loading/empty/retry/stale-selection/no-session states all match accepted user directives and Trinity's UX decision.
+- **Test quality:** 9 focused acceptance tests across ProjectSelectionViewModel and ActiveSessionViewModel cover the core UX state machine. Test doubles are well-structured.
+- **Architecture:** SessionTranscriptController is a clean projection seam for future reconnect/voice extensions. Test project uses Compile-Include links to avoid MAUI SDK dependency.
+- **Minor observation:** `ProjectSelectionViewModel._activeSessionState.Changed` handler doesn't marshal to MainThread (safe today, latent risk). No stale-selection warning tests yet.
+- **Decision file:** `.squad/decisions/inbox/neo-pr53-review.md`.
+
+
+### PR #53 Review & Merge Session (2026-03-25T19:37:30Z)
+
+- PR #53 (Issue #15: MAUI Project & Session UX Polish) reviewed and approved for merge.
+- **Verdict: APPROVE** — Single-session native chat flow correctly enforces strict single-session handoff; state machine (Loading/Empty/Retry/Stale-Selection/Resume/No-Session) coherently implemented; 9 focused acceptance tests provide good coverage; architecture clean for future reconnect/voice extensions.
+- Orchestration log written: 2026-03-25T19-37-30Z-neo.md (review verdict).
+- Session log written: 2026-03-25T19-37-30Z-pr-53-review-merge.md.
+- Decision inbox entry (neo-pr53-review.md) merged into decisions.md and removed from inbox.
+- PR squash-merged to main; remote/local issue branch deleted; local checkout fast-forwarded to merged main.
+- Minor non-blocking observations: latent thread-safety inconsistency in MainThread marshaling (safe but worth harmonizing), no dedicated stale-selection warning test (consider follow-up).
+
