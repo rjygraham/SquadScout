@@ -286,6 +286,35 @@ public sealed class MessageEnvelopeContractTests
     }
 
     [Fact]
+    public void OptimizedFormatsRejectUndefinedNumericMessageType()
+    {
+        const string json = """
+            {
+              "contractVersion": 1,
+              "projectId": "test-project",
+              "sessionId": "test-session",
+              "generation": 5,
+              "messageType": 999,
+              "direction": 1,
+              "acknowledgedSequence": 42,
+              "timestampUtc": 1774375200000,
+              "messageId": "pty-test-42",
+              "correlationId": "client-test-41",
+              "payload": {
+                "replayRequested": false,
+                "expectedIntervalSeconds": 30,
+                "senderInstanceId": "broker-1"
+              }
+            }
+            """;
+
+        var exception = Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<MessageEnvelope<HeartbeatPayload>>(json, SessionMessageSerializer.DefaultOptions));
+
+        Assert.Contains("not defined in enum SessionMessageType", exception.Message);
+    }
+
+    [Fact]
     public void LegacyFormatsDeserializeCorrectlyForBackwardCompatibility()
     {
         // Test string enums, ISO8601 timestamps, and RFC4122 GUIDs
