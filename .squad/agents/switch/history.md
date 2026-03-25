@@ -189,6 +189,15 @@
 - **Handoff:** Orchestration logs written. Decisions merged. Trinity picks up merge-watch for CI/post-merge validation and regression monitoring.
 - **Status:** Phase 1 Wave 1 Issue #9 complete. Advance team to next workstream (PR merge and Phase 2 Orleans integration setup).
 
+### Aspire / ServiceDefaults Review Gate — REJECTED (2026-03-25T00:05:25Z)
+
+- **Requested scope:** Add .NET Aspire orchestration and ServiceDefaults across the solution plus `SquadScout.App`, `SquadScout.Broker`, and `SquadScout.Functions`.
+- **Handoff result:** No valid Seraph handoff existed. No PR was opened, no acceptable handoff report was recorded, and the local worktree `seraph/issue-31-aspire-service-defaults` was a clean copy of `origin/main` with zero code diff.
+- **Validation run anyway:** `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` both passed in `D:\GitHub\SquadScout\.worktrees\seraph-issue-31-aspire-service-defaults` (55/55 tests).
+- **Concrete blockers:** no `AppHost` project, no `ServiceDefaults` project, no Aspire/service-discovery/OpenTelemetry wiring in broker or functions startup, no MAUI-side integration point, and no reviewable diff for solution-structure changes.
+- **Tracking inconsistency:** the branch name references issue `#31`, but GitHub issue `#31` is currently structured logging/correlation IDs, not Aspire / ServiceDefaults.
+- **Revision owner recommendation:** Link should own the next revision because the missing work is primarily solution/orchestration scaffolding; Seraph is locked out for the next revision cycle on this artifact.
+
 
 - **Artifact reviewed:** PR #43 / branch `squad/9-maui-app-shell-scaffolding` at commit `84d7300`
 - **Verdict:** **APPROVED**
