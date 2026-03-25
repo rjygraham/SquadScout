@@ -219,6 +219,7 @@
 
 **Handoff:** WS-2 token validation critical path. Morpheus awaits Switch formal review gate on PR #45. If revision needed, Link assumes ownership per team protocol.
 
+### Issue #13 Formal Review — REJECTED (2026-03-25)
 
 - **Artifact reviewed:** PR #43 / branch `squad/9-maui-app-shell-scaffolding` at commit `84d7300`
 - **Verdict:** **APPROVED**
