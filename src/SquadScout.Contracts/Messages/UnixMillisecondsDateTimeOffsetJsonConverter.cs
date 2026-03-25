@@ -9,13 +9,25 @@ namespace SquadScout.Contracts.Messages;
 /// </summary>
 public sealed class UnixMillisecondsDateTimeOffsetJsonConverter : JsonConverter<DateTimeOffset>
 {
+    private const long MinUnixTimeMilliseconds = -62135596800000L;
+    private const long MaxUnixTimeMilliseconds = 253402300799999L;
+
     public override DateTimeOffset Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         switch (reader.TokenType)
         {
             case JsonTokenType.Number:
                 // Unix milliseconds format (new)
-                var milliseconds = reader.GetInt64();
+                if (!reader.TryGetInt64(out var milliseconds))
+                {
+                    throw new JsonException("Unix milliseconds value must be a 64-bit integer.");
+                }
+
+                if (milliseconds is < MinUnixTimeMilliseconds or > MaxUnixTimeMilliseconds)
+                {
+                    throw new JsonException($"Unix milliseconds value '{milliseconds}' is outside the supported DateTimeOffset range.");
+                }
+
                 return DateTimeOffset.FromUnixTimeMilliseconds(milliseconds);
 
             case JsonTokenType.String:
