@@ -18,18 +18,6 @@ public sealed record PubSubNegotiateResponse
 
     public string SessionGroup { get; init; } = string.Empty;
 
-    public string PrincipalId { get; init; } = string.Empty;
-
-    public string DisplayName { get; init; } = string.Empty;
-
-    public string IdentityProvider { get; init; } = string.Empty;
-
-    public bool IsDevelopmentIdentity { get; init; }
-
-    public string[] Roles { get; init; } = [];
-
-    public string[] AutoJoinGroups { get; init; } = [];
-
     public DateTimeOffset ExpiresAtUtc { get; init; }
 
     public DateTimeOffset RefreshAtUtc { get; init; }

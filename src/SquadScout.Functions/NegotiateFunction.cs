@@ -47,7 +47,7 @@ public sealed class NegotiateFunction
             return await WriteErrorAsync(request, HttpStatusCode.BadRequest, "The negotiate request body is required.", cancellationToken);
         }
 
-        if (!TryValidateRequest(negotiateRequest, out var validationError))
+        if (!PubSubNegotiateRequestValidator.TryValidate(negotiateRequest, out var validationError))
         {
             return await WriteErrorAsync(request, HttpStatusCode.BadRequest, validationError, cancellationToken);
         }
@@ -62,12 +62,13 @@ public sealed class NegotiateFunction
         {
             var response = await _negotiationService.NegotiateAsync(negotiateRequest, identity, cancellationToken);
             _logger.LogInformation(
-                "Issued Web PubSub access for {ParticipantKind} on {ProjectId}/{SessionId} with group {SessionGroup}. Development identity: {IsDevelopmentIdentity}.",
+                "Issued Web PubSub access for {ParticipantKind} on {ProjectId}/{SessionId} with group {SessionGroup} for {UserId}. Development identity: {IsDevelopmentIdentity}.",
                 response.ParticipantKind,
                 response.ProjectId,
                 response.SessionId,
                 response.SessionGroup,
-                response.IsDevelopmentIdentity);
+                response.UserId,
+                identity.IsDevelopment);
 
             var httpResponse = request.CreateResponse(HttpStatusCode.OK);
             await httpResponse.WriteAsJsonAsync(response, cancellationToken);
@@ -91,17 +92,6 @@ public sealed class NegotiateFunction
                 "Azure Web PubSub token issuance failed. Check service configuration and permissions.",
                 cancellationToken);
         }
-    }
-
-    private static bool TryValidateRequest(PubSubNegotiateRequest request, out string validationError)
-    {
-        if (!SessionGroupName.TryCreate(request.ProjectId, request.SessionId, request.BrokerId, out _, out validationError))
-        {
-            return false;
-        }
-
-        validationError = string.Empty;
-        return true;
     }
 
     private static async Task<HttpResponseData> WriteErrorAsync(
