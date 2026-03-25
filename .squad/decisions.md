@@ -700,3 +700,44 @@ This keeps the revision cohesive and close to current Aspire ecosystem guidance 
 **PR #45 APPROVED for merge.** Morpheus activated for merge-watch.
 
 **Status:** Ready for main branch merge.
+
+## Switch — Issue #13 Re-Review Gate: Broker Session Lifecycle Stop Controls (2026-03-25T00:48:45Z)
+
+**Owner:** Switch
+**Artifact:** Morpheus's Broker Session Lifecycle Stop Controls (issue #13, second revision)
+**Verdict:** REJECTED
+
+# Issue #13 Re-review Decision — 2026-03-25
+
+## Verdict
+**REJECTED**
+
+## Artifact Reviewed
+- **PR:** rjygraham/SquadScout#44
+- **Title:** Implement broker session lifecycle stop controls
+- **Branch:** `squad/13-broker-session-start-stop-endpoints`
+- **Commit:** `b01f1683d196726a590cd12b47619d764ca9804a`
+
+## Validation Evidence
+- `dotnet build .\SquadScout.slnx -nologo` ✓
+- `dotnet test .\SquadScout.slnx -nologo --no-build --filter "FullyQualifiedName~SessionRelayPipelineTests"` ✓ (9/9)
+- `dotnet test .\SquadScout.slnx -nologo --no-build` ✓ (60/60)
+
+## What Improved
+- Stop-path input rejection now returns the structured lifecycle conflict contract: `session_stop_in_progress`.
+- `StopAsync(...)` and `RelayInputAsync(...)` now share `StopInputGate`, and the new gated PTY test proves the happy-path overlap deterministically.
+
+## Blocking Findings
+1. **Stop failure recovery re-opens the exact accepted-stop race.**  
+   In `src\SquadScout.Broker\Relay\InMemorySessionRelay.cs`, `StopAsync(...)` accepts stop under `StopInputGate`, but if `TerminateAsync()` throws while the PTY is still running, the catch block calls `ResetStopRequest()` at line 133 after the gate has already been released. A later `RelayInputAsync(...)` call can then acquire the same gate, observe `IsStopRequested == false`, and still reach `WriteAsync(...)` even though stop had already been accepted. That means blocker #1 is not fully fixed; the invariant only holds on the successful-stop path.
+
+2. **The new deterministic regression path does not cover the failing-stop branch that still violates the lifecycle guarantee.**  
+   `tests\SquadScout.Broker.Tests\SessionRelayPipelineTests.cs` adds `StopAsyncSerializesWithAcceptedInputAndReturnsStructuredConflictForLaterInput`, but it exercises only the successful termination path. There is still no deterministic test for `TerminateAsync()` failure / `session_stop_failed` overlap, so the remaining accepted-stop race above is not trapped by the suite.
+
+## Next Revision Owner
+- **Recommended next reviser:** Seraph
+- **Reason:** Link authored the original rejected revision and Morpheus authored this rejected correction. Per reviewer lockout, the next pass should move to a third agent. Seraph is the best fit for session lifecycle/state-transition hardening.
+
+## Reviewer Note
+This is close: blocker #2 from the prior rejection is fixed, and the deterministic gate-based test approach is the right pattern. The remaining problem is narrow but still merge-blocking because it reintroduces post-accept stop/input leakage through the stop-failure recovery path.
+
