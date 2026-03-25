@@ -83,6 +83,17 @@
 - **Stop sequencing stays single-owner:** Stop requests are handled inside `InMemorySessionRelay`, which validates `{ sessionId, projectId }`, marks stop-in-progress to block new input, terminates the PTY, and then lets the existing `PtySessionEnvelopePump` publish the final replayable `SessionLifecycle(Stopped)` envelope from the PTY `Exited` event.
 - **Proof path:** `tests\SquadScout.Broker.Tests\SessionRelayPipelineTests.cs` now covers successful stop, project mismatch, already-stopped rejection, and unknown-project start rejection; `dotnet build .\SquadScout.slnx -nologo` plus `dotnet test .\SquadScout.slnx -nologo --no-build` both pass in `D:\GitHub\SquadScout-13`.
 
+### PR #46 Merge Watch Assignment (2026-03-25T00:42:44Z)
+
+- **Source:** Switch formal review APPROVED verdict on PR #46 (Aspire / ServiceDefaults Revision).
+- **Artifact:** PR #46 / branch `squad/31-aspire-service-defaults-revision` / commit `2c20bae`.
+- **Validation:** Build ✅ | Tests 55/55 ✅ | AppHost smoke start ✅ | Broker `/health` returned `{"status":"ok"}` ✅.
+- **Merge-risk assessment:** Low; local validation green across build, full test suite, and smoke start. GitHub checks absent.
+- **Watch state:** Active for PR #46 main branch integration.
+- **Monitoring plan:** GitHub PR status for merge/close events, post-merge CI/CD pipeline status, AppHost smoke validation post-merge.
+- **Escalation trigger:** AppHost smoke regression post-merge or GitHub check run failures; assess rollback with Switch.
+
+
 ### Issue #5 Completion — CopilotPtyHost Direct Spawn (2026-03-24T21:36:52Z)
 
 - **Mission:** Implement Copilot PTY host using Pty.Net, preserving the PTY seam established in issue #4, with comprehensive failure-mode and lifecycle coverage.
@@ -106,4 +117,12 @@
 - **MAUI boundary:** `src\SquadScout.App` participates through ServiceDefaults + `IHttpClientFactory`, while `src\SquadScout.AppHost\AppHost.cs` registers the MAUI app via `AddMauiProject(...).AddWindowsDevice()` instead of trying to treat the mobile app like a hosted backend service.
 - **Broker orchestration detail:** `src\SquadScout.Broker\Program.cs` must only call `UseUrls` when Aspire has not already injected server URLs, otherwise fixed local config overrides AppHost endpoint assignment.
 - **Validation path:** `dotnet build .\SquadScout.slnx -nologo`, `dotnet test .\SquadScout.slnx -nologo --no-build`, and a smoke `dotnet run --project .\src\SquadScout.AppHost\SquadScout.AppHost.csproj --no-build` all succeeded after the Aspire revision.
+
+### PR #46 Merge (2026-03-25T00:30:00Z)
+
+- **Owner:** Link
+- **PR:** rjygraham/SquadScout#46 "Add Aspire orchestration and ServiceDefaults"
+- **Merge status:** ✅ Successfully merged to main using squash strategy
+- **Rationale:** Single logical commit, clean history, minimizes downstream rebase conflicts
+- **Result:** Aspire + ServiceDefaults now integrated into main; unblocks Phase 2 grain activation and multi-project orchestration testing
 

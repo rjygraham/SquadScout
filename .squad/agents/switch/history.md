@@ -235,3 +235,22 @@
 - **Security read:** Easy Auth headers are only trusted inside the Functions host boundary, mismatched header/payload principals are rejected, client requests cannot self-assert `brokerId`, and PubSub `userId` values are session-scoped (`participant:project:session[:broker]:principal`).
 - **Contract read:** Negotiation response surface is tighter (no echoed principal details/roles/groups), and no checked-in client/broker consumer depends on the removed fields.
 - **Merge-risk note:** No GitHub checks are attached to PR #45 yet; confidence comes from local validation only.
+
+### Aspire / ServiceDefaults Revision — APPROVED (2026-03-25)
+
+- **Artifact reviewed:** PR #46 / branch `squad/31-aspire-service-defaults-revision` at commit `2c20bae`.
+- **Validation run:** `dotnet build .\SquadScout.slnx -nologo` passed, `dotnet test .\SquadScout.slnx -nologo --no-build` passed (55/55), and `dotnet run --project .\src\SquadScout.AppHost\SquadScout.AppHost.csproj --no-build` reached a healthy smoke start; broker `/health` returned `{"status":"ok"}` while AppHost was running.
+- **Compatibility pattern confirmed:** `src\SquadScout.ServiceDefaults` multi-targeting `net8.0;net10.0` is the right seam for sharing OpenTelemetry/logging and `HttpClient` defaults across Functions, Broker, and MAUI without forcing Functions onto `net10.0`.
+- **Critical orchestration seam confirmed:** `src\SquadScout.Broker\Program.cs` must only call `UseUrls(...)` when Aspire has not already injected `urls`; otherwise AppHost endpoint assignment is overridden and orchestration breaks.
+- **Reviewer verdict:** **APPROVED** — the replacement revision closes the prior "no implementation / no handoff" rejection and is ready for merge, with the usual note that no GitHub checks are attached yet.
+
+### PR #46 Merge Watch Handoff (2026-03-25T00:42:44Z)
+
+- **Transition:** Link assumes merge-watch active state for PR #46 (Aspire / ServiceDefaults Revision).
+- **Approval status:** Switch formal review APPROVED.
+- **Local validation summary:** Build ✅ | Tests 55/55 ✅ | AppHost smoke ✅ | Broker /health ✅.
+- **GitHub checks:** Absent; merge confidence based on local validation evidence.
+- **Merge strategy:** Standard squash or commit per squad policy.
+- **Link monitoring scope:** Main branch integration, post-merge CI/CD pipeline (if available), AppHost smoke validation post-merge.
+- **Escalation:** Rollback assessment if post-merge AppHost smoke fails or GitHub checks regression occurs.
+
