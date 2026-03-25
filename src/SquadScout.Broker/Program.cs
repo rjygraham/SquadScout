@@ -28,6 +28,7 @@ builder.Services.AddOpenTelemetry()
     });
 
 var brokerOptions = builder.Configuration.GetSection(BrokerHostOptions.SectionName).Get<BrokerHostOptions>() ?? new BrokerHostOptions();
+var effectiveListenUrl = builder.Configuration[WebHostDefaults.ServerUrlsKey] ?? brokerOptions.ListenUrl;
 if (string.IsNullOrWhiteSpace(builder.Configuration[WebHostDefaults.ServerUrlsKey]))
 {
     builder.WebHost.UseUrls(brokerOptions.ListenUrl);
@@ -55,7 +56,7 @@ if (app.Environment.IsDevelopment())
 app.MapGet("/", () => Results.Ok(new
 {
     service = "SquadScout Broker",
-    listenUrl = brokerOptions.ListenUrl,
+    listenUrl = effectiveListenUrl,
     localUi = "reserved for the co-hosted Blazor Server admin shell",
     relay = "reserved for Azure Web PubSub integration",
     state = "reserved for Orleans-backed session ownership"

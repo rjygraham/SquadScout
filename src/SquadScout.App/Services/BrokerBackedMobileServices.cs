@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Json;
 using SquadScout.App.Configuration;
 using SquadScout.Contracts.Projects;
@@ -74,25 +74,27 @@ public sealed class MessagingConnectionService : IMessageConnectionService
 
 public sealed class BrokerProjectCatalogService : IProjectCatalogService
 {
-    private readonly HttpClient _httpClient;
+    private readonly Func<HttpClient> _createHttpClient;
     private readonly AppEnvironment _environment;
     private readonly LocalDevelopmentOptions _localDevelopmentOptions;
 
     public BrokerProjectCatalogService(
-        HttpClient httpClient,
+        Func<HttpClient> createHttpClient,
         AppEnvironment environment,
         LocalDevelopmentOptions localDevelopmentOptions)
     {
-        _httpClient = httpClient;
+        _createHttpClient = createHttpClient;
         _environment = environment;
         _localDevelopmentOptions = localDevelopmentOptions;
     }
 
     public async Task<ProjectCatalogSnapshot> GetProjectsAsync(CancellationToken cancellationToken = default)
     {
+        using var httpClient = _createHttpClient();
+
         try
         {
-            var projects = await _httpClient.GetFromJsonAsync<RegisteredProject[]>("api/projects", cancellationToken)
+            var projects = await httpClient.GetFromJsonAsync<RegisteredProject[]>("api/projects", cancellationToken)
                 ?? Array.Empty<RegisteredProject>();
 
             if (projects.Length > 0 || !CanUseFallbackProjects())
@@ -133,25 +135,27 @@ public sealed class BrokerSessionLifecycleService : ISessionLifecycleService
 {
     internal const string LocalDevelopmentSessionPrefix = "localdev-";
 
-    private readonly HttpClient _httpClient;
+    private readonly Func<HttpClient> _createHttpClient;
     private readonly AppEnvironment _environment;
     private readonly LocalDevelopmentOptions _localDevelopmentOptions;
 
     public BrokerSessionLifecycleService(
-        HttpClient httpClient,
+        Func<HttpClient> createHttpClient,
         AppEnvironment environment,
         LocalDevelopmentOptions localDevelopmentOptions)
     {
-        _httpClient = httpClient;
+        _createHttpClient = createHttpClient;
         _environment = environment;
         _localDevelopmentOptions = localDevelopmentOptions;
     }
 
     public async Task<SessionLaunchResult> StartAsync(StartSessionCommand command, CancellationToken cancellationToken = default)
     {
+        using var httpClient = _createHttpClient();
+
         try
         {
-            using var response = await _httpClient.PostAsJsonAsync("api/sessions", command, cancellationToken);
+            using var response = await httpClient.PostAsJsonAsync("api/sessions", command, cancellationToken);
             response.EnsureSuccessStatusCode();
 
             var session = await response.Content.ReadFromJsonAsync<SessionDescriptor>(cancellationToken: cancellationToken)
@@ -184,7 +188,8 @@ public sealed class BrokerSessionLifecycleService : ISessionLifecycleService
             return null;
         }
 
-        using var response = await _httpClient.GetAsync($"api/sessions/{Uri.EscapeDataString(sessionId)}", cancellationToken);
+        using var httpClient = _createHttpClient();
+        using var response = await httpClient.GetAsync($"api/sessions/{Uri.EscapeDataString(sessionId)}", cancellationToken);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             return null;

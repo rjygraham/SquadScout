@@ -36,3 +36,10 @@
 - **Single-user + multi-machine design confirmed.** Design local broker scaffolding to support multiple developers with separate Azure credentials; no shared multi-user backend until post-MVP.
 - **App-level sequencing/replay via Orleans confirmed** as source of truth, not Web PubSub features. Service-tier reliability features not required; Orleans grain single-threaded execution enforces atomicity.
 - **Status:** All 6 Seraph workstreams aligned to Neo's unified decomposition. WS-3 (PubSub routing) and WS-4 (token refresh/reconnect) priority path locked. Ready for Phase 1 execution.
+
+### 2026-03-25: Aspire orchestration + ServiceDefaults groundwork
+
+- Aligned the repo's new Aspire AppHost and ServiceDefaults rollout with Seraph-owned startup concerns after the shared Aspire scaffolding landed on main.
+- Documented why the shared defaults project stays multi-targeted for net8.0 and net10.0 so the Azure Functions worker can opt into AddServiceDefaults() while the MAUI app can initialize OpenTelemetry via the MAUI-specific startup hook.
+- Preserved broker compatibility by surfacing the effective ASP.NET Core listen URL in the root status payload while still letting standalone runs honor Broker:ListenUrl.
+- Updated the MAUI app to create broker clients through an Aspire-configured HttpClient factory seam so resilience and future service discovery can flow into mobile-to-broker calls without breaking offline fallbacks.

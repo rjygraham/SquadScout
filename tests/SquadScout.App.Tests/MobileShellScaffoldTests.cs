@@ -57,7 +57,7 @@ public sealed class MobileShellScaffoldTests
         };
 
         var service = new BrokerProjectCatalogService(
-            httpClient,
+            () => httpClient,
             new AppEnvironment(AppEnvironment.DevelopmentName),
             new LocalDevelopmentOptions
             {
@@ -89,7 +89,7 @@ public sealed class MobileShellScaffoldTests
         };
 
         var service = new BrokerSessionLifecycleService(
-            httpClient,
+            () => httpClient,
             new AppEnvironment(AppEnvironment.DevelopmentName),
             new LocalDevelopmentOptions
             {
