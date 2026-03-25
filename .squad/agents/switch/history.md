@@ -254,3 +254,12 @@
 - **Link monitoring scope:** Main branch integration, post-merge CI/CD pipeline (if available), AppHost smoke validation post-merge.
 - **Escalation:** Rollback assessment if post-merge AppHost smoke fails or GitHub checks regression occurs.
 
+### Issue #13 Re-review — REJECTED (2026-03-25)
+
+- **Artifact reviewed:** PR #44 / branch `squad/13-broker-session-start-stop-endpoints` at commit `b01f168`.
+- **Validation run:** `dotnet build .\SquadScout.slnx -nologo` passed, focused `SessionRelayPipelineTests` passed (9/9), and full solution tests passed (60/60) in `D:\GitHub\SquadScout-13`.
+- **Confirmed fix:** stop-related input rejection now returns structured `SessionControlException` contract with code `session_stop_in_progress`, and the new gated PTY test proves the successful stop/input overlap path deterministically.
+- **Remaining blocker:** `InMemorySessionRelay.StopAsync(...)` still clears `_stopRequested` via `ResetStopRequest()` after `TerminateAsync()` failures without re-entering `StopInputGate`, so input can be admitted again after stop was already accepted if the PTY remains running.
+- **Coverage gap that matters:** the new deterministic regression test only covers successful stop completion; no failing-stop / `session_stop_failed` overlap test guards the remaining race.
+- **Recommended next reviser:** Seraph. Link authored the original rejected revision, Morpheus authored this rejected correction, so the next cycle should move to a third agent with lifecycle ownership.
+
