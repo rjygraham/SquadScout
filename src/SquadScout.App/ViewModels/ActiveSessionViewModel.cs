@@ -137,6 +137,7 @@ public sealed class ActiveSessionViewModel : ViewModelBase
         {
             if (SetProperty(ref _hasActiveSession, value))
             {
+                NotifySessionChromeChanged();
                 RefreshCommands();
             }
         }
@@ -149,8 +150,20 @@ public sealed class ActiveSessionViewModel : ViewModelBase
     public string MessagingSummary
     {
         get => _messagingSummary;
-        private set => SetProperty(ref _messagingSummary, value);
+        private set
+        {
+            if (SetProperty(ref _messagingSummary, value))
+            {
+                NotifySessionChromeChanged();
+            }
+        }
     }
+
+    public string NavigationHint => HasActiveSession
+        ? "Projects keeps this session available to resume. Clear removes the local shell context on this device."
+        : "Return to projects to choose a repo and start a session.";
+
+    public bool ShowProjectPickerAction => !HasActiveSession;
 
     public string ProjectName
     {
@@ -193,7 +206,13 @@ public sealed class ActiveSessionViewModel : ViewModelBase
     public string SourceSummary
     {
         get => _sourceSummary;
-        private set => SetProperty(ref _sourceSummary, value);
+        private set
+        {
+            if (SetProperty(ref _sourceSummary, value))
+            {
+                NotifySessionChromeChanged();
+            }
+        }
     }
 
     public IReadOnlyList<TranscriptBannerState> StatusBanners
@@ -211,7 +230,13 @@ public sealed class ActiveSessionViewModel : ViewModelBase
     public string StartedAt
     {
         get => _startedAt;
-        private set => SetProperty(ref _startedAt, value);
+        private set
+        {
+            if (SetProperty(ref _startedAt, value))
+            {
+                NotifySessionChromeChanged();
+            }
+        }
     }
 
     public IReadOnlyList<TranscriptMessageState> TranscriptMessages
@@ -391,6 +416,12 @@ public sealed class ActiveSessionViewModel : ViewModelBase
         _canComposeMessage = viewState.CanCompose;
         OnPropertyChanged(nameof(CanSendMessage));
         RefreshCommands();
+    }
+
+    private void NotifySessionChromeChanged()
+    {
+        OnPropertyChanged(nameof(NavigationHint));
+        OnPropertyChanged(nameof(ShowProjectPickerAction));
     }
 
     private async Task SendMessageAsync()
