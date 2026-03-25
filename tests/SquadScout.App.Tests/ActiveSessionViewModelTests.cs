@@ -156,6 +156,45 @@ public sealed class ActiveSessionViewModelTests
     }
 
     [Fact]
+    public async Task StatusChange_WhenLiveTransportFaults_DisablesComposer()
+    {
+        var activeState = new ActiveSessionState();
+        activeState.SetActiveSession(
+            CreateProject("squadscout", "SquadScout"),
+            CreateSession("squadscout", "session-15", SessionState.Running),
+            SessionActivationSource.Broker,
+            "Broker-backed session.");
+
+        var messageConnection = new RecordingMessageConnectionService(new MessageConnectionStatus
+        {
+            State = MessageConnectionState.Connected,
+            Summary = "Connected to session stream.",
+            SupportsLiveSessionStream = true,
+            SessionId = "session-15"
+        });
+
+        var viewModel = CreateViewModel(activeSessionState: activeState, connectionService: messageConnection);
+        await viewModel.InitializeAsync();
+
+        viewModel.ComposerText = "Hello from mobile";
+        Assert.True(viewModel.CanSendMessage);
+
+        messageConnection.PublishStatus(new MessageConnectionStatus
+        {
+            State = MessageConnectionState.Faulted,
+            Summary = "Reconnect failed.",
+            FailureReason = "Socket unavailable.",
+            SupportsLiveSessionStream = true,
+            SessionId = "session-15"
+        });
+
+        Assert.False(viewModel.CanSendMessage);
+        Assert.False(viewModel.SendMessageCommand.CanExecute(null));
+        Assert.Equal("Live messaging is unavailable. Socket unavailable.", viewModel.ComposerPlaceholder);
+        Assert.Contains(viewModel.StatusBanners, banner => banner.Title == "Live transport unavailable");
+    }
+
+    [Fact]
     public async Task InitializeAsync_DevelopmentFallbackSession_DisablesBrokerRefreshAndShowsOfflineBanner()
     {
         var activeState = new ActiveSessionState();

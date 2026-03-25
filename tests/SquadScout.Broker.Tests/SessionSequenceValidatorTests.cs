@@ -68,6 +68,7 @@ public sealed class SessionSequenceValidatorTests
 
         Assert.Equal(SequenceValidationStatus.GapDetected, result.Status);
         Assert.Contains("gap", result.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.IsAccepted);
         Assert.Equal(2, result.AppliedAcknowledgedSequence);
     }
 
@@ -137,7 +138,7 @@ public sealed class SessionSequenceValidatorTests
             CreateClientHeartbeat(clientSequence: 5, acknowledgedSequence: 8));
 
         Assert.Equal(SequenceValidationStatus.GapDetected, result.Status);
-        Assert.False(result.IsAccepted);
+        Assert.True(result.IsAccepted);
         Assert.Equal(4, result.AppliedAcknowledgedSequence);
     }
 

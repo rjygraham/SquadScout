@@ -106,6 +106,52 @@ public sealed class SessionTranscriptControllerTests
         Assert.Empty(result.ViewState.Messages);
     }
 
+    [Fact]
+    public void Sync_LivePendingSession_DisablesComposerUntilRunning()
+    {
+        var controller = new SessionTranscriptController();
+
+        var state = controller.Sync(
+            CreateSnapshot(SessionState.Pending, SessionActivationSource.Broker),
+            new MessageConnectionStatus
+            {
+                State = MessageConnectionState.Connected,
+                Summary = "Live messaging connected for the pending session.",
+                Hub = "squadscout",
+                SupportsLiveSessionStream = true
+            });
+
+        Assert.False(state.CanCompose);
+        Assert.Equal("Wait for the broker to start the session before sending messages.", state.ComposerPlaceholder);
+        Assert.Equal(
+            "The broker is still starting this session. Messaging unlocks once the live session is running.",
+            state.EmptyDescription);
+    }
+
+    [Fact]
+    public void SendDraft_RejectsWhenLiveTransportIsUnavailable()
+    {
+        var controller = new SessionTranscriptController();
+        var snapshot = CreateSnapshot(SessionState.Running, SessionActivationSource.Broker);
+        var connectionStatus = new MessageConnectionStatus
+        {
+            State = MessageConnectionState.Faulted,
+            Summary = "Reconnect failed.",
+            FailureReason = "Socket unavailable.",
+            Hub = "squadscout",
+            SupportsLiveSessionStream = true
+        };
+
+        controller.Sync(snapshot, connectionStatus);
+        var result = controller.SendDraft(snapshot, connectionStatus, "Ryan", "Should fail");
+
+        Assert.False(result.Success);
+        Assert.Contains("unavailable", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(result.ViewState.Messages);
+        Assert.False(result.ViewState.CanCompose);
+        Assert.Contains(result.ViewState.Banners, banner => banner.Title == "Live transport unavailable");
+    }
+
     private static ActiveSessionSnapshot CreateSnapshot(SessionState state, SessionActivationSource source)
     {
         return new ActiveSessionSnapshot(

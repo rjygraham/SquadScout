@@ -16,5 +16,5 @@ public sealed record SequenceValidationResult
 
     public string? Reason { get; init; }
 
-    public bool IsAccepted => Status is SequenceValidationStatus.Accepted or SequenceValidationStatus.Duplicate;
+    public bool IsAccepted => Status is SequenceValidationStatus.Accepted or SequenceValidationStatus.Duplicate or SequenceValidationStatus.GapDetected;
 }

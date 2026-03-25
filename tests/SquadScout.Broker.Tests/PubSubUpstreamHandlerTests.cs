@@ -107,6 +107,38 @@ public sealed class PubSubUpstreamHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsyncRejectsEnvelopeThatCannotMapToPhaseOneSessionGroup()
+    {
+        var brokerCalled = false;
+        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
+        {
+            brokerCalled = true;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }))
+        {
+            BaseAddress = new Uri("http://127.0.0.1:5071")
+        };
+
+        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
+        var envelope = CreateInputEnvelope() with
+        {
+            ProjectId = "broker:west"
+        };
+        using var body = CreateJsonBody(envelope);
+
+        var response = await handler.HandleAsync(
+            "POST",
+            CreateSignedHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}"),
+            body,
+            CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("Phase 1 session group", response.Body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("projectId", response.Body, StringComparison.Ordinal);
+        Assert.False(brokerCalled);
+    }
+
+    [Fact]
     public async Task HandleAsyncReturnsWebhookValidationHeadersForOptionsRequests()
     {
         using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>

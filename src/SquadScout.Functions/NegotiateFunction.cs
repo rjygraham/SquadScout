@@ -54,7 +54,10 @@ public sealed class NegotiateFunction
 
         if (!_identityResolver.TryResolve(request.Url, request.Headers, out var identity, out var authFailureStatus, out var authFailureMessage))
         {
-            _logger.LogWarning("Rejected negotiate request because no trusted identity boundary was established.");
+            _logger.LogWarning(
+                "Rejected negotiate request with status {StatusCode}: {FailureMessage}",
+                authFailureStatus,
+                authFailureMessage);
             return await WriteErrorAsync(request, authFailureStatus, authFailureMessage, cancellationToken);
         }
 

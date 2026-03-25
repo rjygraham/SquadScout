@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using SquadScout.Broker.Relay;
 using SquadScout.Broker.Sessions;
 using SquadScout.Contracts.Messages;
@@ -50,9 +51,13 @@ public sealed class InMemorySessionOrchestratorReplayTests
             });
 
         Assert.Null(replay.Sequence);
+        Assert.Equal(2, replay.Payload.FromSequenceInclusive);
+        Assert.Equal(4, replay.Payload.ToSequenceInclusive);
         Assert.True(replay.Payload.GapDetected);
         Assert.Equal(2, replay.Payload.AvailableFromSequence);
         Assert.Equal(4, replay.Payload.AvailableToSequence);
+        Assert.Equal("corr-output", replay.CorrelationId);
+        Assert.Equal("client-replay-1", replay.CausationId);
         Assert.Collection(
             replay.Payload.Messages,
             message => Assert.Equal(2, message.Sequence),
@@ -196,6 +201,51 @@ public sealed class InMemorySessionOrchestratorReplayTests
         Assert.Empty(replay.Payload.Messages);
     }
 
+    [Fact]
+    public async Task GapDetectedInputLogsCorrelationRichPayloadSafeWarning()
+    {
+        var logger = new RecordingLogger<InMemorySessionOrchestrator>();
+        var orchestrator = new InMemorySessionOrchestrator(
+            new NullRelayPublisher(),
+            new SessionSequenceValidator(),
+            logger: logger);
+        var session = await StartSessionAsync(orchestrator);
+
+        _ = await orchestrator.RecordBrokerMessageAsync(
+            session.SessionId,
+            CreateBrokerCommand(SessionMessageType.Output, "broker-output-1", "corr-broker", new { text = "ready" }));
+
+        _ = await orchestrator.AcceptClientMessageAsync(
+            session.SessionId,
+            CreateInputEnvelope(session, clientSequence: 1, acknowledgedSequence: 1, content: "first\n"),
+            static (_, _) => Task.CompletedTask);
+
+        var gap = await orchestrator.AcceptClientMessageAsync(
+            session.SessionId,
+            CreateInputEnvelope(
+                session,
+                clientSequence: 3,
+                acknowledgedSequence: 1,
+                content: "password=swordfish\n",
+                messageId: "client-gap-3",
+                correlationId: "corr-gap-3"),
+            static (_, _) => Task.CompletedTask);
+
+        Assert.Equal(SequenceValidationStatus.GapDetected, gap.Status);
+
+        var warning = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, warning.Level);
+        Assert.Contains(session.ProjectId, warning.Message, StringComparison.Ordinal);
+        Assert.Contains(session.SessionId, warning.Message, StringComparison.Ordinal);
+        Assert.Contains("generation 1", warning.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("MessageId=client-gap-3", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("CorrelationId=corr-gap-3", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("expected 2", warning.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("received 3", warning.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("swordfish", warning.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("password=", warning.Message, StringComparison.Ordinal);
+    }
+
     private static async Task<SessionDescriptor> StartSessionAsync(InMemorySessionOrchestrator orchestrator) =>
         await orchestrator.StartAsync(new StartSessionCommand
         {
@@ -215,4 +265,51 @@ public sealed class InMemorySessionOrchestratorReplayTests
             CorrelationId = correlationId,
             Payload = payload
         };
+
+    private static MessageEnvelope<InputChunkPayload> CreateInputEnvelope(
+        SessionDescriptor session,
+        long clientSequence,
+        long acknowledgedSequence,
+        string content,
+        string? messageId = null,
+        string? correlationId = null) =>
+        new()
+        {
+            ProjectId = session.ProjectId,
+            SessionId = session.SessionId,
+            Generation = SessionEnvelopeContract.InitialGeneration,
+            MessageType = SessionMessageType.Input,
+            Direction = MessageDirection.ClientToBroker,
+            ClientSequence = clientSequence,
+            AcknowledgedSequence = acknowledgedSequence,
+            MessageId = messageId ?? $"client-input-{clientSequence}",
+            CorrelationId = correlationId ?? $"corr-input-{clientSequence}",
+            Payload = new InputChunkPayload
+            {
+                Content = content
+            }
+        };
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        private readonly List<LogEntry> _entries = [];
+
+        public IReadOnlyList<LogEntry> Entries => _entries;
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            _entries.Add(new LogEntry(logLevel, formatter(state, exception)));
+        }
+    }
+
+    private sealed record LogEntry(LogLevel Level, string Message);
 }

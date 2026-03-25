@@ -119,6 +119,46 @@ public sealed class SessionRelayPipelineTests
     }
 
     [Fact]
+    public async Task RelayInputAsyncForwardsGapDetectedClientMessagesAndFreezesAcknowledgement()
+    {
+        var harness = await CreateHarnessAsync();
+        await using var relay = harness.CreateRelay();
+
+        var session = await relay.StartAsync(new StartSessionCommand
+        {
+            ProjectId = "broker",
+            RequestedBy = "tests"
+        });
+
+        var ptySession = harness.PtyHost.GetRequiredSession(session.SessionId);
+        ptySession.EnqueueOutput("ready", afterTicks: 1);
+        ptySession.ReleaseNext();
+        _ = await harness.RelayPublisher.WaitForEnvelopeCountAsync(2);
+
+        var first = await relay.RelayInputAsync(
+            session.SessionId,
+            CreateInputEnvelope(session, clientSequence: 1, "first\n") with
+            {
+                AcknowledgedSequence = 1
+            });
+
+        var gap = await relay.RelayInputAsync(
+            session.SessionId,
+            CreateInputEnvelope(session, clientSequence: 3, "gap\n") with
+            {
+                AcknowledgedSequence = 2,
+                MessageId = "client-input-3-gap"
+            });
+
+        Assert.Equal(SequenceValidationStatus.Accepted, first.Status);
+        Assert.Equal(1, first.AppliedAcknowledgedSequence);
+        Assert.Equal(SequenceValidationStatus.GapDetected, gap.Status);
+        Assert.True(gap.IsAccepted);
+        Assert.Equal(1, gap.AppliedAcknowledgedSequence);
+        Assert.Equal(["first\n", "gap\n"], ptySession.WrittenInputs);
+    }
+
+    [Fact]
     public async Task StopAsyncSerializesWithAcceptedInputAndReturnsStructuredConflictForLaterInput()
     {
         var catalog = new InMemoryProjectCatalog();

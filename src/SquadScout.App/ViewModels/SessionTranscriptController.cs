@@ -42,6 +42,16 @@ public sealed class SessionTranscriptController
                 ViewState: BuildViewState(snapshot, connectionStatus));
         }
 
+        var transportBlockedReason = GetComposeBlockedReason(snapshot, connectionStatus);
+        if (!string.IsNullOrWhiteSpace(transportBlockedReason))
+        {
+            return new TranscriptSendResult(
+                Success: false,
+                StatusMessage: string.Empty,
+                ErrorMessage: transportBlockedReason,
+                ViewState: BuildViewState(snapshot, connectionStatus));
+        }
+
         var normalizedDraft = draft?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(normalizedDraft))
         {
@@ -157,7 +167,7 @@ public sealed class SessionTranscriptController
         ActiveSessionSnapshot snapshot,
         MessageConnectionStatus connectionStatus)
     {
-        var canCompose = snapshot.HasActiveSession && snapshot.Session?.State != SessionState.Stopped;
+        var canCompose = string.IsNullOrWhiteSpace(GetComposeBlockedReason(snapshot, connectionStatus));
 
         return new SessionTranscriptViewState(
             Banners: BuildBanners(snapshot, connectionStatus),
@@ -210,9 +220,16 @@ public sealed class SessionTranscriptController
         else if (connectionStatus.State != MessageConnectionState.Connected)
         {
             banners.Add(new TranscriptBannerState(
-                "Reconnecting",
+                connectionStatus.State switch
+                {
+                    MessageConnectionState.Ready => "Live transport staged",
+                    MessageConnectionState.Connecting or MessageConnectionState.Reconnecting => "Reconnecting",
+                    _ => "Live transport unavailable"
+                },
                 connectionStatus.Summary,
-                TranscriptBannerSeverity.Warning));
+                connectionStatus.State == MessageConnectionState.Faulted
+                    ? TranscriptBannerSeverity.Error
+                    : TranscriptBannerSeverity.Warning));
         }
 
         if (snapshot.Source == SessionActivationSource.DevelopmentFallback)
@@ -238,7 +255,7 @@ public sealed class SessionTranscriptController
 
         if (!canCompose)
         {
-            return "This session is closed.";
+            return GetComposeBlockedReason(snapshot, connectionStatus) ?? "This session is closed.";
         }
 
         if (!connectionStatus.SupportsLiveSessionStream)
@@ -266,6 +283,16 @@ public sealed class SessionTranscriptController
         if (!connectionStatus.SupportsLiveSessionStream)
         {
             return "Send a message to preview the chat timeline while live PubSub delivery lands in #11.";
+        }
+
+        if (snapshot.Session?.State == SessionState.Pending)
+        {
+            return "The broker is still starting this session. Messaging unlocks once the live session is running.";
+        }
+
+        if (connectionStatus.State != MessageConnectionState.Connected)
+        {
+            return connectionStatus.Summary;
         }
 
         return "Incoming replies and your own messages will appear here in order.";
@@ -302,6 +329,42 @@ public sealed class SessionTranscriptController
 
     private static string CreateSessionKey(ActiveSessionSnapshot snapshot) =>
         $"{snapshot.Project!.ProjectId}:{snapshot.Session!.SessionId}";
+
+    private static string? GetComposeBlockedReason(
+        ActiveSessionSnapshot snapshot,
+        MessageConnectionStatus connectionStatus)
+    {
+        if (!snapshot.HasActiveSession || snapshot.Session is null)
+        {
+            return "Start or resume a session before sending a message.";
+        }
+
+        if (snapshot.Session.State == SessionState.Stopped)
+        {
+            return "This session has already stopped, so sending is disabled.";
+        }
+
+        if (!connectionStatus.SupportsLiveSessionStream)
+        {
+            return null;
+        }
+
+        if (snapshot.Session.State == SessionState.Pending)
+        {
+            return "Wait for the broker to start the session before sending messages.";
+        }
+
+        return connectionStatus.State switch
+        {
+            MessageConnectionState.Connected => null,
+            MessageConnectionState.Ready => "Live messaging is staged for this session. Reconnect the live transport before sending.",
+            MessageConnectionState.Connecting or MessageConnectionState.Reconnecting => "Live messaging is reconnecting. Wait for the session stream before sending.",
+            MessageConnectionState.Faulted => connectionStatus.FailureReason is { Length: > 0 }
+                ? $"Live messaging is unavailable. {connectionStatus.FailureReason}"
+                : "Live messaging is unavailable. Reconnect the live transport before sending.",
+            _ => "Live messaging is offline. Reconnect the live transport before sending."
+        };
+    }
 
     private void EnsureSession(ActiveSessionSnapshot snapshot)
     {

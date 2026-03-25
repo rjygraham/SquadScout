@@ -4,6 +4,7 @@ using System.Text.Json;
 using SquadScout.App.Configuration;
 using SquadScout.Contracts.Messages;
 using SquadScout.Contracts.Realtime;
+using SquadScout.Contracts.Security;
 using SquadScout.Contracts.Sessions;
 
 namespace SquadScout.App.Services;
@@ -11,16 +12,21 @@ namespace SquadScout.App.Services;
 public sealed class MessagingConnectionService : IMessageConnectionService, IAsyncDisposable
 {
     private const string WebPubSubSubprotocol = "json.webpubsub.azure.v1";
+    private static readonly TimeSpan TokenRefreshLeadTime = TimeSpan.FromMinutes(5);
 
+    private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
     private readonly MessagingOptions _messagingOptions;
     private readonly IPubSubNegotiationClient _negotiationClient;
     private readonly SemaphoreSlim _operationGate = new(1, 1);
     private readonly ConcurrentDictionary<long, TaskCompletionSource<WebPubSubAckMessage>> _pendingAcks = new();
     private readonly object _stateSync = new();
     private readonly IWebPubSubSocketFactory _socketFactory;
+    private readonly Func<DateTimeOffset> _utcNow;
 
     private SessionDescriptor? _activeSession;
     private PubSubNegotiateResponse? _negotiation;
+    private CancellationTokenSource? _refreshLoopCts;
+    private Task? _refreshLoopTask;
     private IWebPubSubSocket? _socket;
     private CancellationTokenSource? _receiveLoopCts;
     private Task? _receiveLoopTask;
@@ -31,16 +37,35 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
     private long _nextClientSequence;
     private long _currentGeneration = SessionEnvelopeContract.InitialGeneration;
     private long? _acknowledgedSequence;
+    private long? _highestObservedBrokerSequence;
     private bool _gapDetected;
+    private bool _replayRequestPending;
 
     public MessagingConnectionService(
         MessagingOptions messagingOptions,
         IPubSubNegotiationClient negotiationClient,
         IWebPubSubSocketFactory socketFactory)
+        : this(
+            messagingOptions,
+            negotiationClient,
+            socketFactory,
+            static () => DateTimeOffset.UtcNow,
+            static (delay, cancellationToken) => Task.Delay(delay, cancellationToken))
+    {
+    }
+
+    internal MessagingConnectionService(
+        MessagingOptions messagingOptions,
+        IPubSubNegotiationClient negotiationClient,
+        IWebPubSubSocketFactory socketFactory,
+        Func<DateTimeOffset> utcNow,
+        Func<TimeSpan, CancellationToken, Task> delayAsync)
     {
         _messagingOptions = messagingOptions ?? throw new ArgumentNullException(nameof(messagingOptions));
         _negotiationClient = negotiationClient ?? throw new ArgumentNullException(nameof(negotiationClient));
         _socketFactory = socketFactory ?? throw new ArgumentNullException(nameof(socketFactory));
+        _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
+        _delayAsync = delayAsync ?? throw new ArgumentNullException(nameof(delayAsync));
         _currentStatus = CreateDisconnectedStatus();
     }
 
@@ -182,38 +207,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var (session, negotiation, socket) = GetConnectedTransport();
-            EnsureEnvelopeTargetsSession(envelope, session);
-
-            if (envelope.Direction != MessageDirection.ClientToBroker)
-            {
-                throw new InvalidOperationException("Only client-to-broker envelopes can be sent from the mobile transport.");
-            }
-
-            var ackId = Interlocked.Increment(ref _nextAckId);
-            await SendCommandExpectAckAsync(
-                    socket,
-                    new WebPubSubSendEventCommand
-                    {
-                        Event = SessionUpstreamEventNames.Resolve(envelope.MessageType),
-                        DataType = "json",
-                        Data = JsonSerializer.SerializeToElement(envelope, SessionMessageSerializer.DefaultOptions),
-                        AckId = ackId
-                    },
-                    ackId,
-                    "send session envelope",
-                    treatDuplicateAsSuccess: false,
-                    cancellationToken)
-                .ConfigureAwait(false);
-
-            AppendTraffic(
-                new MessageEnvelopeTraffic
-                {
-                    Direction = MessageTrafficDirection.Outgoing,
-                    Envelope = ToJsonEnvelope(envelope),
-                    ObservedAtUtc = DateTimeOffset.UtcNow,
-                    Summary = $"Sent {envelope.MessageType} for session '{session.SessionId}'."
-                });
+            await SendEnvelopeCoreAsync(envelope, requireConnectedStatus: true, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -255,30 +249,37 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
     private async Task<MessageConnectionStatus> ConnectCoreAsync(
         bool isReconnect,
         int reconnectAttempt,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        PubSubNegotiateResponse? negotiationOverride = null,
+        bool publishTransitionStatus = true,
+        string? failureReasonPrefix = null)
     {
         var session = GetActiveSession()
             ?? throw new InvalidOperationException("An active session is required before live messaging can connect.");
 
         await CleanupTransportAsync(cancellationToken).ConfigureAwait(false);
 
-        PublishStatus(
-            new MessageConnectionStatus
-            {
-                State = isReconnect ? MessageConnectionState.Reconnecting : MessageConnectionState.Connecting,
-                Summary = isReconnect
-                    ? $"Retrying live messaging for session '{session.SessionId}'."
-                    : $"Connecting live messaging for session '{session.SessionId}'.",
-                Hub = _messagingOptions.Hub,
-                SupportsLiveSessionStream = true,
-                ProjectId = session.ProjectId,
-                SessionId = session.SessionId,
-                ReconnectAttempt = reconnectAttempt
-            });
+        if (publishTransitionStatus)
+        {
+            PublishStatus(
+                new MessageConnectionStatus
+                {
+                    State = isReconnect ? MessageConnectionState.Reconnecting : MessageConnectionState.Connecting,
+                    Summary = isReconnect
+                        ? $"Retrying live messaging for session '{session.SessionId}'."
+                        : $"Connecting live messaging for session '{session.SessionId}'.",
+                    Hub = _messagingOptions.Hub,
+                    SupportsLiveSessionStream = true,
+                    ProjectId = session.ProjectId,
+                    SessionId = session.SessionId,
+                    ReconnectAttempt = reconnectAttempt
+                });
+        }
 
         try
         {
-            var negotiation = await _negotiationClient.NegotiateAsync(session, cancellationToken).ConfigureAwait(false);
+            var negotiation = negotiationOverride
+                              ?? await _negotiationClient.NegotiateAsync(session, cancellationToken).ConfigureAwait(false);
             var socket = _socketFactory.Create();
 
             using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -320,12 +321,22 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 SessionId = session.SessionId,
                 SessionGroup = negotiation.SessionGroup,
                 ConnectionId = connectionId,
-                ConnectedAtUtc = DateTimeOffset.UtcNow,
+                ConnectedAtUtc = _utcNow(),
                 RefreshAtUtc = negotiation.RefreshAtUtc,
                 ReconnectAttempt = reconnectAttempt
             };
 
             PublishStatus(status);
+            ScheduleTokenRefresh(negotiation);
+            if (isReconnect)
+            {
+                await RequestReplayAsync(
+                        ReplayRequestReason.ReconnectResume,
+                        operationGateHeld: true,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             return status;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -334,14 +345,19 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             var timeoutStatus = CreateFaultedStatus(
                 session,
                 reconnectAttempt,
-                "Connecting to Azure Web PubSub timed out. Retry the live transport when the function and service are reachable.");
+                ComposeFailureReason(
+                    failureReasonPrefix,
+                    "Connecting to Azure Web PubSub timed out. Retry the live transport when the function and service are reachable."));
             PublishStatus(timeoutStatus);
             return timeoutStatus;
         }
         catch (Exception ex)
         {
             await CleanupTransportAsync(CancellationToken.None).ConfigureAwait(false);
-            var failureStatus = CreateFaultedStatus(session, reconnectAttempt, ex.Message);
+            var failureStatus = CreateFaultedStatus(
+                session,
+                reconnectAttempt,
+                ComposeFailureReason(failureReasonPrefix, ex.Message));
             PublishStatus(failureStatus);
             return failureStatus;
         }
@@ -455,62 +471,238 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         }
     }
 
-    private Task ProcessGroupMessageAsync(JsonElement root, CancellationToken cancellationToken)
+    private async Task ProcessGroupMessageAsync(JsonElement root, CancellationToken cancellationToken)
     {
         if (!root.TryGetProperty("dataType", out var dataTypeElement) ||
             !string.Equals(dataTypeElement.GetString(), "json", StringComparison.OrdinalIgnoreCase))
         {
             PublishReceiveFault("The live session stream returned a non-JSON group message, which the mobile transport cannot process.");
-            return Task.CompletedTask;
+            return;
         }
 
         var data = root.GetProperty("data").Clone();
         var envelope = data.Deserialize<MessageEnvelope<JsonElement>>(SessionMessageSerializer.DefaultOptions)
             ?? throw new InvalidOperationException("Azure Web PubSub delivered a malformed session envelope.");
 
+        if (envelope.MessageType == SessionMessageType.ReplayResponse)
+        {
+            await ApplyReplayResponseAsync(envelope, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var gapJustDetected = TrackBrokerSequence(envelope);
+        AppendTraffic(
+            new MessageEnvelopeTraffic
+            {
+                Direction = MessageTrafficDirection.Incoming,
+                Envelope = ToJsonEnvelope(envelope),
+                ObservedAtUtc = DateTimeOffset.UtcNow,
+                Summary = $"Received {envelope.MessageType} for session '{envelope.SessionId}'."
+            });
+
+        if (gapJustDetected)
+        {
+            PublishStatus(
+                CurrentStatus with
+                {
+                    Summary =
+                        $"Live messaging detected a broker sequence gap for session '{envelope.SessionId}'. Requesting replay before trusting transcript continuity."
+                });
+
+            QueueReplayRequest(ReplayRequestReason.GapDetected, cancellationToken);
+        }
+    }
+
+    private async Task ApplyReplayResponseAsync(
+        MessageEnvelope<JsonElement> envelope,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var payload = envelope.Payload.Deserialize<ReplayResponsePayload>(SessionMessageSerializer.DefaultOptions)
+            ?? throw new InvalidOperationException("Azure Web PubSub delivered a malformed replay response payload.");
+
         lock (_stateSync)
         {
-            if (envelope.Generation != _currentGeneration)
-            {
-                _currentGeneration = envelope.Generation;
-                _acknowledgedSequence = null;
-                _gapDetected = false;
-            }
-
-            if (envelope.Sequence is long sequence)
-            {
-                var expectedSequence = (_acknowledgedSequence ?? 0) + 1;
-                if (sequence == expectedSequence)
-                {
-                    _acknowledgedSequence = sequence;
-                }
-                else if (sequence > expectedSequence)
-                {
-                    _gapDetected = true;
-                }
-            }
+            _replayRequestPending = false;
         }
 
         AppendTraffic(
             new MessageEnvelopeTraffic
             {
                 Direction = MessageTrafficDirection.Incoming,
-                Envelope = envelope,
+                Envelope = ToJsonEnvelope(envelope),
                 ObservedAtUtc = DateTimeOffset.UtcNow,
-                Summary = $"Received {envelope.MessageType} for session '{envelope.SessionId}'."
+                Summary = $"Received replay response for session '{envelope.SessionId}'."
             });
 
-        if (_gapDetected)
+        if (payload.GapDetected)
         {
-            PublishStatus(
-                CurrentStatus with
+            PublishStatus(CreateReplayGapWarningStatus(envelope.SessionId, payload));
+        }
+
+        foreach (var replayedEnvelope in payload.Messages)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            TrackBrokerSequence(replayedEnvelope);
+            AppendTraffic(
+                new MessageEnvelopeTraffic
                 {
-                    Summary =
-                        $"Live messaging is connected, but a broker sequence gap was detected for session '{envelope.SessionId}'. Retry the transport before trusting transcript continuity."
+                    Direction = MessageTrafficDirection.Incoming,
+                    Envelope = ToJsonEnvelope(replayedEnvelope),
+                    ObservedAtUtc = DateTimeOffset.UtcNow,
+                    Summary = $"Applied replayed {replayedEnvelope.MessageType} for session '{replayedEnvelope.SessionId}'."
                 });
         }
 
-        return Task.CompletedTask;
+        if (!payload.GapDetected && !IsGapDetected())
+        {
+            var restoredStatus = TryCreateConnectedStatus();
+            if (restoredStatus is not null)
+            {
+                PublishStatus(restoredStatus);
+            }
+        }
+    }
+
+    private bool TrackBrokerSequence(MessageEnvelope<JsonElement> envelope)
+    {
+        lock (_stateSync)
+        {
+            if (envelope.Generation != _currentGeneration)
+            {
+                _currentGeneration = envelope.Generation;
+                _acknowledgedSequence = null;
+                _highestObservedBrokerSequence = null;
+                _gapDetected = false;
+                _replayRequestPending = false;
+            }
+
+            var gapJustDetected = false;
+            if (envelope.Sequence is long sequence)
+            {
+                _highestObservedBrokerSequence = Math.Max(_highestObservedBrokerSequence ?? 0, sequence);
+
+                var expectedSequence = (_acknowledgedSequence ?? 0) + 1;
+                if (sequence == expectedSequence)
+                {
+                    _acknowledgedSequence = sequence;
+                    _gapDetected = (_acknowledgedSequence ?? 0) < (_highestObservedBrokerSequence ?? 0);
+                }
+                else if (sequence > expectedSequence)
+                {
+                    gapJustDetected = !_gapDetected && !_replayRequestPending;
+                    _gapDetected = true;
+                }
+                else
+                {
+                    _gapDetected = (_acknowledgedSequence ?? 0) < (_highestObservedBrokerSequence ?? 0);
+                }
+            }
+
+            return gapJustDetected;
+        }
+    }
+
+    private bool IsGapDetected()
+    {
+        lock (_stateSync)
+        {
+            return _gapDetected;
+        }
+    }
+
+    private async Task RequestReplayAsync(
+        ReplayRequestReason reason,
+        bool operationGateHeld,
+        CancellationToken cancellationToken)
+    {
+        if (!operationGateHeld)
+        {
+            await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        try
+        {
+            var replayRequest = CreateReplayRequestEnvelope(reason);
+            if (replayRequest is null)
+            {
+                return;
+            }
+
+            await SendEnvelopeCoreAsync(replayRequest, requireConnectedStatus: true, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            lock (_stateSync)
+            {
+                _replayRequestPending = false;
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (!operationGateHeld)
+            {
+                _operationGate.Release();
+            }
+        }
+    }
+
+    private void QueueReplayRequest(ReplayRequestReason reason, CancellationToken cancellationToken)
+    {
+        _ = RunReplayRequestAsync(reason, cancellationToken);
+    }
+
+    private async Task RunReplayRequestAsync(ReplayRequestReason reason, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RequestReplayAsync(reason, operationGateHeld: false, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            PublishReceiveFault($"The live session stream could not request replay: {ex.Message}");
+        }
+    }
+
+    private MessageEnvelope<ReplayRequestPayload>? CreateReplayRequestEnvelope(ReplayRequestReason reason)
+    {
+        lock (_stateSync)
+        {
+            if (_activeSession is null)
+            {
+                throw new InvalidOperationException("An active session is required before replay can be requested.");
+            }
+
+            if (reason == ReplayRequestReason.GapDetected && _replayRequestPending)
+            {
+                return null;
+            }
+
+            _replayRequestPending = true;
+            return new MessageEnvelope<ReplayRequestPayload>
+            {
+                ProjectId = _activeSession.ProjectId,
+                SessionId = _activeSession.SessionId,
+                Generation = _currentGeneration,
+                MessageType = SessionMessageType.ReplayRequest,
+                Direction = MessageDirection.ClientToBroker,
+                AcknowledgedSequence = _acknowledgedSequence,
+                TimestampUtc = _utcNow(),
+                MessageId = $"replay-{_activeSession.SessionId}-{Guid.NewGuid():n}",
+                CorrelationId = $"mobile-session:{_activeSession.SessionId}",
+                Payload = new ReplayRequestPayload
+                {
+                    FromSequenceInclusive = (_acknowledgedSequence ?? 0) + 1,
+                    Reason = reason
+                }
+            };
+        }
     }
 
     private async Task SendJoinGroupAsync(IWebPubSubSocket socket, string sessionGroup, CancellationToken cancellationToken)
@@ -564,14 +756,57 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         }
     }
 
+    private async Task SendEnvelopeCoreAsync<TPayload>(
+        MessageEnvelope<TPayload> envelope,
+        bool requireConnectedStatus,
+        CancellationToken cancellationToken)
+    {
+        var (session, socket) = GetTransportForSend(requireConnectedStatus);
+        EnsureEnvelopeTargetsSession(envelope, session);
+
+        if (envelope.Direction != MessageDirection.ClientToBroker)
+        {
+            throw new InvalidOperationException("Only client-to-broker envelopes can be sent from the mobile transport.");
+        }
+
+        var ackId = Interlocked.Increment(ref _nextAckId);
+        await SendCommandExpectAckAsync(
+                socket,
+                new WebPubSubSendEventCommand
+                {
+                    Event = ResolveUpstreamEventName(envelope.MessageType),
+                    DataType = "json",
+                    Data = JsonSerializer.SerializeToElement(envelope, SessionMessageSerializer.DefaultOptions),
+                    AckId = ackId
+                },
+                ackId,
+                "send session envelope",
+                treatDuplicateAsSuccess: false,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        AppendTraffic(
+            new MessageEnvelopeTraffic
+            {
+                Direction = MessageTrafficDirection.Outgoing,
+                Envelope = ToJsonEnvelope(envelope),
+                ObservedAtUtc = _utcNow(),
+                Summary = $"Sent {envelope.MessageType} for session '{session.SessionId}'."
+            });
+    }
+
     private async Task CleanupTransportAsync(CancellationToken cancellationToken)
     {
+        CancellationTokenSource? refreshLoopCts;
         IWebPubSubSocket? socket;
         CancellationTokenSource? receiveLoopCts;
         Task? receiveLoopTask;
 
         lock (_stateSync)
         {
+            refreshLoopCts = _refreshLoopCts;
+            _refreshLoopTask = null;
+            _refreshLoopCts = null;
             socket = _socket;
             receiveLoopCts = _receiveLoopCts;
             receiveLoopTask = _receiveLoopTask;
@@ -587,6 +822,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         }
 
         _pendingAcks.Clear();
+        refreshLoopCts?.Cancel();
         receiveLoopCts?.Cancel();
 
         if (socket is not null)
@@ -617,19 +853,21 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             }
         }
 
+        refreshLoopCts?.Dispose();
         receiveLoopCts?.Dispose();
     }
 
-    private (SessionDescriptor Session, PubSubNegotiateResponse Negotiation, IWebPubSubSocket Socket) GetConnectedTransport()
+    private (SessionDescriptor Session, IWebPubSubSocket Socket) GetTransportForSend(bool requireConnectedStatus)
     {
         lock (_stateSync)
         {
-            if (_activeSession is null || _negotiation is null || _socket is null || CurrentStatus.State != MessageConnectionState.Connected)
+            if (_activeSession is null || _negotiation is null || _socket is null ||
+                (requireConnectedStatus && _currentStatus.State != MessageConnectionState.Connected))
             {
                 throw new InvalidOperationException("Live messaging is not connected. Use Retry live transport to reconnect before sending.");
             }
 
-            return (_activeSession, _negotiation, _socket);
+            return (_activeSession, _socket);
         }
     }
 
@@ -667,7 +905,9 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             _connectionId = null;
             _currentGeneration = SessionEnvelopeContract.InitialGeneration;
             _acknowledgedSequence = null;
+            _highestObservedBrokerSequence = null;
             _gapDetected = false;
+            _replayRequestPending = false;
             _nextAckId = 0;
             _nextClientSequence = 0;
             if (clearTraffic)
@@ -697,6 +937,110 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         }
 
         PublishStatus(CreateFaultedStatus(session, CurrentStatus.ReconnectAttempt, message));
+    }
+
+    private void ScheduleTokenRefresh(PubSubNegotiateResponse negotiation)
+    {
+        if (negotiation.RefreshAtUtc == default)
+        {
+            return;
+        }
+
+        var delay = CalculateRefreshDelay(negotiation.RefreshAtUtc);
+        var refreshLoopCts = new CancellationTokenSource();
+        var refreshLoopTask = Task.Run(
+            () => WaitForTokenRefreshAsync(delay, refreshLoopCts.Token),
+            CancellationToken.None);
+
+        lock (_stateSync)
+        {
+            _refreshLoopCts = refreshLoopCts;
+            _refreshLoopTask = refreshLoopTask;
+        }
+    }
+
+    private async Task WaitForTokenRefreshAsync(TimeSpan delay, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _delayAsync(delay, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        await RefreshTokenAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task RefreshTokenAsync(CancellationToken cancellationToken)
+    {
+        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var session = GetActiveSession();
+            if (session is null || CurrentStatus.State != MessageConnectionState.Connected)
+            {
+                return;
+            }
+
+            try
+            {
+                var negotiation = await _negotiationClient.NegotiateAsync(session, CancellationToken.None).ConfigureAwait(false);
+                await ConnectCoreAsync(
+                        isReconnect: true,
+                        reconnectAttempt: CurrentStatus.ReconnectAttempt,
+                        CancellationToken.None,
+                        negotiationOverride: negotiation,
+                        publishTransitionStatus: false,
+                        failureReasonPrefix: "Token refresh failed. Retry the live transport after confirming the broker negotiate endpoint is reachable.")
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                await CleanupTransportAsync(CancellationToken.None).ConfigureAwait(false);
+                PublishStatus(
+                    CreateFaultedStatus(
+                        session,
+                        CurrentStatus.ReconnectAttempt,
+                        ComposeFailureReason(
+                            "Token refresh failed. Retry the live transport after confirming the broker negotiate endpoint is reachable.",
+                            ex.Message)));
+            }
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
+    }
+
+    private TimeSpan CalculateRefreshDelay(DateTimeOffset refreshAtUtc)
+    {
+        var remaining = refreshAtUtc - _utcNow();
+        if (remaining <= TimeSpan.Zero)
+        {
+            return TimeSpan.Zero;
+        }
+
+        var fiveMinuteDelay = remaining - TokenRefreshLeadTime;
+        if (fiveMinuteDelay <= TimeSpan.Zero)
+        {
+            return TimeSpan.Zero;
+        }
+
+        var seventyFivePercentDelay = TimeSpan.FromTicks((long)(remaining.Ticks * 0.75d));
+        return fiveMinuteDelay < seventyFivePercentDelay
+            ? fiveMinuteDelay
+            : seventyFivePercentDelay;
     }
 
     private void PublishStatus(MessageConnectionStatus status)
@@ -758,6 +1102,73 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             FailureReason = failureReason
         };
 
+    private MessageConnectionStatus? TryCreateConnectedStatus()
+    {
+        lock (_stateSync)
+        {
+            if (_activeSession is null || _negotiation is null || _currentStatus.State == MessageConnectionState.Disconnected)
+            {
+                return null;
+            }
+
+            return new MessageConnectionStatus
+            {
+                State = MessageConnectionState.Connected,
+                Summary = _currentStatus.ReconnectAttempt > 0
+                    ? $"Live messaging reconnected for session '{_activeSession.SessionId}' on hub '{_negotiation.Hub}'."
+                    : $"Live messaging connected for session '{_activeSession.SessionId}' on hub '{_negotiation.Hub}'.",
+                Hub = _negotiation.Hub,
+                SupportsLiveSessionStream = true,
+                ProjectId = _activeSession.ProjectId,
+                SessionId = _activeSession.SessionId,
+                SessionGroup = _negotiation.SessionGroup,
+                ConnectionId = _connectionId,
+                ConnectedAtUtc = _currentStatus.ConnectedAtUtc,
+                RefreshAtUtc = _negotiation.RefreshAtUtc,
+                ReconnectAttempt = _currentStatus.ReconnectAttempt
+            };
+        }
+    }
+
+    private MessageConnectionStatus CreateReplayGapWarningStatus(string sessionId, ReplayResponsePayload payload)
+    {
+        var windowSummary = payload.AvailableFromSequence is long availableFrom && payload.AvailableToSequence is long availableTo
+            ? $" Available replay window: {availableFrom}-{availableTo}."
+            : string.Empty;
+        var failureReason =
+            $"Replay could not fully recover session '{sessionId}' because the broker reported a replay gap.{windowSummary} Reconnect or restart the session before trusting transcript continuity.";
+
+        var connectedStatus = TryCreateConnectedStatus();
+        if (connectedStatus is null)
+        {
+            var session = GetActiveSession()
+                ?? throw new InvalidOperationException("An active session is required before replay recovery warnings can be published.");
+            return CreateFaultedStatus(session, CurrentStatus.ReconnectAttempt, failureReason);
+        }
+
+        return connectedStatus with
+        {
+            State = MessageConnectionState.Faulted,
+            Summary = $"Live messaging replay warning for session '{sessionId}'. {failureReason}",
+            FailureReason = failureReason
+        };
+    }
+
+    private static string ResolveUpstreamEventName(SessionMessageType messageType) =>
+        messageType switch
+        {
+            SessionMessageType.Input or SessionMessageType.ReplayRequest => SessionUpstreamEventNames.Input,
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(messageType),
+                messageType,
+                "No Azure Web PubSub upstream event is defined for this session message type.")
+        };
+
+    private static string ComposeFailureReason(string? prefix, string detail) =>
+        string.IsNullOrWhiteSpace(prefix)
+            ? detail
+            : $"{prefix} {detail}";
+
     private static MessageEnvelope<JsonElement> ToJsonEnvelope<TPayload>(MessageEnvelope<TPayload> envelope) =>
         new()
         {
@@ -774,9 +1185,10 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             MessageId = envelope.MessageId,
             CorrelationId = envelope.CorrelationId,
             CausationId = envelope.CausationId,
-            Payload = envelope.Payload is JsonElement jsonPayload
-                ? jsonPayload.Clone()
-                : JsonSerializer.SerializeToElement(envelope.Payload, SessionMessageSerializer.DefaultOptions)
+            Payload = SecretRedactor.Redact(
+                envelope.Payload is JsonElement jsonPayload
+                    ? jsonPayload.Clone()
+                    : JsonSerializer.SerializeToElement(envelope.Payload, SessionMessageSerializer.DefaultOptions))
         };
 
     private sealed record WebPubSubJoinGroupCommand

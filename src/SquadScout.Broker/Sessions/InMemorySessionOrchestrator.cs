@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 using SquadScout.Broker.Relay;
 using SquadScout.Contracts.Messages;
 using SquadScout.Contracts.Sessions;
@@ -10,16 +11,19 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
     private readonly IRelayPublisher _relayPublisher;
     private readonly int _replayBufferCapacity;
     private readonly ISequenceValidator _sequenceValidator;
+    private readonly ILogger<InMemorySessionOrchestrator> _logger;
     private readonly ConcurrentDictionary<string, SessionRuntimeState> _sessions = new(StringComparer.OrdinalIgnoreCase);
 
     public InMemorySessionOrchestrator(
         IRelayPublisher relayPublisher,
         ISequenceValidator sequenceValidator,
-        int replayBufferCapacity = SessionSequencingDefaults.ReplayBufferCapacity)
+        int replayBufferCapacity = SessionSequencingDefaults.ReplayBufferCapacity,
+        ILogger<InMemorySessionOrchestrator>? logger = null)
     {
         _relayPublisher = relayPublisher;
         _sequenceValidator = sequenceValidator;
         _replayBufferCapacity = replayBufferCapacity;
+        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemorySessionOrchestrator>.Instance;
     }
 
     public Task<SessionDescriptor?> GetAsync(string sessionId, CancellationToken cancellationToken = default)
@@ -51,7 +55,13 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
             CreatedAtUtc = DateTimeOffset.UtcNow
         };
 
-        _sessions[session.SessionId] = new SessionRuntimeState(session, _replayBufferCapacity);
+        var state = new SessionRuntimeState(session, _replayBufferCapacity);
+        lock (state.SyncRoot)
+        {
+            state.RecordSessionStarted(command.RequestedBy);
+        }
+
+        _sessions[session.SessionId] = state;
         await _relayPublisher.PublishSessionStartedAsync(session, cancellationToken);
 
         return session;
@@ -103,7 +113,9 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
             SequenceValidationResult result;
             lock (state.SyncRoot)
             {
+                state.RecordEnvelopeObserved(envelope);
                 result = _sequenceValidator.Validate(state.CreateSnapshot(), envelope);
+                state.RecordClientValidation(envelope, result);
                 if (!result.IsAccepted || result.Status == SequenceValidationStatus.Duplicate)
                 {
                     state.ApplyValidationResult(result);
@@ -111,7 +123,33 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
                 }
             }
 
-            await onAcceptedAsync(envelope, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await onAcceptedAsync(envelope, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                lock (state.SyncRoot)
+                {
+                    state.RecordClientForwardFailure(envelope, result, ex);
+                }
+
+                throw;
+            }
+
+            if (result.Status == SequenceValidationStatus.GapDetected)
+            {
+                _logger.LogWarning(
+                    "Client sequence gap detected for project {ProjectId} session {SessionId} generation {Generation}: expected {Expected}, received {Received}, ack {AcknowledgedSequence}. MessageId={MessageId}, CorrelationId={CorrelationId}. Input forwarded.",
+                    envelope.ProjectId,
+                    envelope.SessionId,
+                    result.Generation,
+                    result.ExpectedClientSequence,
+                    result.ClientSequence,
+                    result.AppliedAcknowledgedSequence,
+                    envelope.MessageId,
+                    envelope.CorrelationId);
+            }
 
             lock (state.SyncRoot)
             {
@@ -144,11 +182,14 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
         await state.ClientMessageGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            MessageEnvelope<ReplayResponsePayload> response;
             lock (state.SyncRoot)
             {
+                state.RecordEnvelopeObserved(request);
                 if (request.Generation == state.Generation)
                 {
                     var validation = _sequenceValidator.Validate(state.CreateSnapshot(), request);
+                    state.RecordClientValidation(request, validation);
                     if (!validation.IsAccepted)
                     {
                         throw new InvalidOperationException(validation.Reason ?? $"Replay request rejected with {validation.Status}.");
@@ -157,12 +198,47 @@ public sealed class InMemorySessionOrchestrator : ISessionOrchestrator
                     state.ApplyValidationResult(validation);
                 }
 
-                return state.CreateReplayResponse(request);
+                response = state.CreateReplayResponse(request);
             }
+
+            if (response.Payload.GapDetected)
+            {
+                _logger.LogWarning(
+                    "Replay for session {SessionId} generation {Generation} reported a gap: requested {RequestedFrom}-{RequestedTo}, available {AvailableFrom}-{AvailableTo}, correlation {CorrelationId}.",
+                    sessionId,
+                    response.Generation,
+                    request.Payload.FromSequenceInclusive,
+                    request.Payload.ToSequenceInclusive,
+                    response.Payload.AvailableFromSequence,
+                    response.Payload.AvailableToSequence,
+                    request.CorrelationId);
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "Replay for session {SessionId} generation {Generation} returned {MessageCount} message(s) for correlation {CorrelationId}.",
+                    sessionId,
+                    response.Generation,
+                    response.Payload.Messages.Count,
+                    request.CorrelationId);
+            }
+
+            return response;
         }
         finally
         {
             state.ClientMessageGate.Release();
+        }
+    }
+
+    public Task<SessionTelemetrySnapshot> ExportTelemetryAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var state = GetRequiredSessionState(sessionId);
+        lock (state.SyncRoot)
+        {
+            return Task.FromResult(state.ExportTelemetry());
         }
     }
 

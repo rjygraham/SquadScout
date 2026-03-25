@@ -41,6 +41,7 @@ public sealed class WebPubSubUpstreamHandler
         cancellationToken.ThrowIfCancellationRequested();
 
         var allowedOrigin = GetHeaderValue(headers, WebHookRequestOriginHeaderName);
+        var connectionId = GetHeaderValue(headers, CloudEventConnectionIdHeaderName);
         if (string.Equals(method, "OPTIONS", StringComparison.OrdinalIgnoreCase))
         {
             return new WebPubSubUpstreamResponse(HttpStatusCode.OK, allowedOrigin);
@@ -48,6 +49,11 @@ public sealed class WebPubSubUpstreamHandler
 
         if (!_authenticator.TryAuthenticate(headers, out var authenticationFailure))
         {
+            _logger.LogWarning(
+                "Rejected Azure Web PubSub upstream request for connection {ConnectionId} from origin {Origin}: {FailureMessage}",
+                connectionId ?? "<missing>",
+                allowedOrigin ?? "<missing>",
+                authenticationFailure);
             return Error(HttpStatusCode.Unauthorized, allowedOrigin, authenticationFailure);
         }
 
@@ -97,29 +103,62 @@ public sealed class WebPubSubUpstreamHandler
             return Error(HttpStatusCode.BadRequest, allowedOrigin, "The upstream request must include projectId and sessionId.");
         }
 
+        if (!TryResolvePhaseOneSessionGroup(envelope, out var sessionGroup, out var sessionGroupError))
+        {
+            _logger.LogWarning(
+                "Rejected Azure Web PubSub input {MessageId} for project {ProjectId} session {SessionId} from connection {ConnectionId}: {FailureMessage}",
+                envelope.MessageId,
+                envelope.ProjectId,
+                envelope.SessionId,
+                connectionId ?? "<missing>",
+                sessionGroupError);
+            return Error(HttpStatusCode.BadRequest, allowedOrigin, sessionGroupError);
+        }
+
         var brokerResponse = await _brokerInputForwarder.ForwardAsync(envelope, cancellationToken).ConfigureAwait(false);
         if (brokerResponse.IsSuccessStatusCode)
         {
             _logger.LogDebug(
-                "Forwarded Azure Web PubSub input {MessageId} for session {SessionId} from connection {ConnectionId} to the broker.",
+                "Forwarded Azure Web PubSub input {MessageId} for project {ProjectId} session {SessionId} through session group {SessionGroup} from connection {ConnectionId} to the broker.",
                 envelope.MessageId,
+                envelope.ProjectId,
                 envelope.SessionId,
-                GetHeaderValue(headers, CloudEventConnectionIdHeaderName));
+                sessionGroup,
+                connectionId ?? "<missing>");
 
             return new WebPubSubUpstreamResponse(HttpStatusCode.NoContent, allowedOrigin);
         }
 
         _logger.LogWarning(
-            "Broker rejected Azure Web PubSub input {MessageId} for session {SessionId} with status code {StatusCode}.",
+            "Broker rejected Azure Web PubSub input {MessageId} for project {ProjectId} session {SessionId} through session group {SessionGroup} from connection {ConnectionId} with status code {StatusCode}. Broker response: {BrokerResponseBody}",
             envelope.MessageId,
+            envelope.ProjectId,
             envelope.SessionId,
-            brokerResponse.StatusCode);
+            sessionGroup,
+            connectionId ?? "<missing>",
+            brokerResponse.StatusCode,
+            brokerResponse.Body ?? "<empty>");
 
         return new WebPubSubUpstreamResponse(
             brokerResponse.StatusCode,
             allowedOrigin,
             brokerResponse.Body ?? SerializeBody(new { error = "Broker input forwarding failed." }),
             "application/json");
+    }
+
+    private static bool TryResolvePhaseOneSessionGroup(
+        MessageEnvelope<InputChunkPayload> envelope,
+        out string sessionGroup,
+        out string validationError)
+    {
+        if (SessionGroupName.TryCreate(envelope.ProjectId, envelope.SessionId, brokerId: null, out sessionGroup, out validationError))
+        {
+            return true;
+        }
+
+        validationError =
+            $"The upstream request projectId/sessionId must map to a valid Phase 1 session group. {validationError}";
+        return false;
     }
 
     private static WebPubSubUpstreamResponse Error(HttpStatusCode statusCode, string? allowedOrigin, string error) =>
