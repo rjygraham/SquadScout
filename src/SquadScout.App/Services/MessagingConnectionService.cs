@@ -190,16 +190,14 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 throw new InvalidOperationException("Only client-to-broker envelopes can be sent from the mobile transport.");
             }
 
-            var payload = JsonSerializer.SerializeToElement(envelope, SessionMessageSerializer.DefaultOptions);
             var ackId = Interlocked.Increment(ref _nextAckId);
             await SendCommandExpectAckAsync(
                     socket,
-                    new WebPubSubSendToGroupCommand
+                    new WebPubSubSendEventCommand
                     {
-                        Group = negotiation.SessionGroup,
+                        Event = SessionUpstreamEventNames.Resolve(envelope.MessageType),
                         DataType = "json",
-                        Data = payload,
-                        NoEcho = true,
+                        Data = JsonSerializer.SerializeToElement(envelope, SessionMessageSerializer.DefaultOptions),
                         AckId = ackId
                     },
                     ackId,
@@ -790,17 +788,15 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         public long AckId { get; init; }
     }
 
-    private sealed record WebPubSubSendToGroupCommand
+    private sealed record WebPubSubSendEventCommand
     {
-        public string Type { get; init; } = "sendToGroup";
+        public string Type { get; init; } = "event";
 
-        public string Group { get; init; } = string.Empty;
+        public string Event { get; init; } = string.Empty;
 
         public string DataType { get; init; } = "json";
 
         public JsonElement Data { get; init; }
-
-        public bool NoEcho { get; init; }
 
         public long AckId { get; init; }
     }

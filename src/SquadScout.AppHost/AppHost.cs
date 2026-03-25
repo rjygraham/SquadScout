@@ -4,7 +4,9 @@ var broker = builder.AddProject<Projects.SquadScoutBroker>("broker", launchProfi
     .WithHttpEndpoint(name: "http", port: 5071, isProxied: false)
     .WithHttpHealthCheck("/health");
 
-builder.AddAzureFunctionsProject<Projects.SquadScoutFunctions>("functions");
+builder.AddAzureFunctionsProject<Projects.SquadScoutFunctions>("functions")
+    .WithReference(broker)
+    .WithEnvironment("Functions__BrokerBaseUrl", broker.GetEndpoint("http"));
 
 builder.AddMauiProject("app", @"..\SquadScout.App\SquadScout.App.csproj")
     .AddWindowsDevice()

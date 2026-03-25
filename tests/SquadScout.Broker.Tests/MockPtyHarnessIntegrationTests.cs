@@ -10,7 +10,7 @@ public sealed class MockPtyHarnessIntegrationTests
     public async Task PumpsDeterministicPtyEventsThroughRelaySequencingAndReplay()
     {
         var harness = new MockPtyHarnessFixture(replayBufferCapacity: 8);
-        var session = await harness.StartAsync("--project", "broker");
+        var session = await harness.StartAsync("broker", "--project", "broker");
 
         await harness.PtySession.WriteAsync("explain testability\n");
         harness.PtySession.EnqueueOutput("hel", afterTicks: 1);

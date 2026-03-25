@@ -3,10 +3,12 @@ using SquadScout.Broker.Pty;
 using SquadScout.Broker.Projects;
 using SquadScout.Broker.Relay;
 using SquadScout.Broker.Sessions;
+using Azure.Messaging.WebPubSub;
 using SquadScout.Contracts.Messages;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
@@ -36,10 +38,25 @@ if (string.IsNullOrWhiteSpace(builder.Configuration[WebHostDefaults.ServerUrlsKe
 
 builder.Services.Configure<BrokerHostOptions>(builder.Configuration.GetSection(BrokerHostOptions.SectionName));
 builder.Services.Configure<CopilotPtyHostOptions>(builder.Configuration.GetSection(CopilotPtyHostOptions.SectionName));
+builder.Services.Configure<AzureWebPubSubOptions>(builder.Configuration.GetSection(AzureWebPubSubOptions.SectionName));
 builder.Services.AddSingleton<IProjectCatalog, InMemoryProjectCatalog>();
 builder.Services.AddSingleton<IPtyHost, CopilotPtyHost>();
 builder.Services.AddSingleton<PtySessionEnvelopePump>();
-builder.Services.AddSingleton<IRelayPublisher, NullRelayPublisher>();
+builder.Services.AddSingleton<ISessionGroupResolver, SessionGroupResolver>();
+builder.Services.AddSingleton<IRelayPublisher>(serviceProvider =>
+{
+    var options = serviceProvider.GetRequiredService<IOptions<AzureWebPubSubOptions>>().Value;
+    if (string.IsNullOrWhiteSpace(options.ConnectionString))
+    {
+        return new NullRelayPublisher();
+    }
+
+    var groupClient = new AzureWebPubSubGroupClient(new WebPubSubServiceClient(options.ConnectionString, options.Hub));
+    return new AzureWebPubSubRelayPublisher(
+        groupClient,
+        serviceProvider.GetRequiredService<ISessionGroupResolver>(),
+        serviceProvider.GetRequiredService<ILogger<AzureWebPubSubRelayPublisher>>());
+});
 builder.Services.AddSingleton<ISessionRelay, InMemorySessionRelay>();
 builder.Services.AddSingleton<ISequenceValidator, SessionSequenceValidator>();
 builder.Services.AddSingleton<ISessionOrchestrator, InMemorySessionOrchestrator>();

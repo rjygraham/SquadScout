@@ -147,3 +147,26 @@
 - **Rationale:** Single logical commit, clean history, minimizes downstream rebase conflicts
 - **Result:** Aspire + ServiceDefaults now integrated into main; unblocks Phase 2 grain activation and multi-project orchestration testing
 
+### Issue #14 Broker PubSub Session Routing Slice (2026-03-25)
+
+- **Routing rule centralized:** `src\SquadScout.Broker\Relay\SessionGroupResolver.cs` now makes the broker consume the approved base session-group contract `session:{projectId}:{sessionId}` directly from shared contracts, while still leaving the optional `:brokerId` suffix dormant for later broker-affinity work.
+- **Broker relay seam upgraded:** `src\SquadScout.Broker\Relay\AzureWebPubSubRelayPublisher.cs` and `AzureWebPubSubGroupClient.cs` now give the broker a real Azure Web PubSub publish path when `AzureWebPubSub:ConnectionString` is configured, and they explicitly track broker join/leave on session start/stop before and after PTY lifecycle traffic is published.
+- **Inbound alignment without faking #11:** `src\SquadScout.Broker\Relay\InMemorySessionRelay.cs` now resolves the same session group for accepted client input so routing stays explicit and testable, but live MAUI join/leave plus actual Web PubSub command ingress still depend on issue #11’s missing client connection service.
+- **Proof points:** `tests\SquadScout.Broker.Tests\SessionRelayPipelineTests.cs`, `AzureWebPubSubRelayPublisherTests.cs`, `SessionGroupResolverTests.cs`, and the updated `RecordingRelayPublisher` now cover approved group naming, broker join/leave tracking, and PTY message fan-out routing.
+- **Validation:** `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` both pass in `D:\GitHub\SquadScout-14` after the routing slice.
+
+### Issue #14 Reassessment After #11 Merge (2026-03-25)
+
+- **Rebase checkpoint:** PR #48 / issue #11 is now merged on `main`, and `squad/14-pubsub-session-routing-group-membership` was rebased cleanly onto that state.
+- **Original blocker removed:** `src\SquadScout.App\Services\MessagingConnectionService.cs` is no longer the old ready-state stub; it now negotiates and connects to Azure Web PubSub, so MAUI-side session-group join logic is present.
+- **Remaining blocker made explicit:** Client input now goes out as `WebPubSubSendToGroupCommand`, but `src\SquadScout.Functions` still only exposes `NegotiateFunction` and the broker still only ingests live input via `POST /api/sessions/{sessionId}/input`. There is no inbound Web PubSub event/upstream handler forwarding group messages back into the broker.
+- **Validation still green:** `dotnet test .\SquadScout.slnx -nologo --no-build --logger "console;verbosity=minimal"` passes with 76/76 tests (8 app, 68 broker), so the remaining problem is end-to-end routing completeness rather than a current unit-test failure.
+- **Decision:** Do not open the #14 PR until the inbound command-ingress seam is implemented or the team explicitly narrows #14’s scope.
+
+### Issue #14 Completion — Web PubSub Inbound Handler (2026-03-25)
+
+- **Ingress seam closed:** `src\SquadScout.Functions\WebPubSubUpstreamFunction.cs` plus `src\SquadScout.Functions\Upstream\WebPubSubUpstreamHandler.cs` now accept Azure Web PubSub custom-event webhooks, return the required `WebHook-Allowed-Origin` validation header, deserialize client `InputChunkPayload` envelopes, and forward them into the existing broker `/api/sessions/{sessionId}/input` path.
+- **Transport contract corrected:** `src\SquadScout.Contracts\Realtime\SessionUpstreamEventNames.cs` now defines the shared custom event name `session-input`, and `src\SquadScout.App\Services\MessagingConnectionService.cs` sends live client input with Web PubSub `event` frames instead of `sendToGroup`, because upstream handlers are only invoked for custom events.
+- **Local orchestration wiring completed:** `src\SquadScout.Functions\Configuration\FunctionsHostOptions.cs`, `Program.cs`, `local.settings.sample.json`, and `src\SquadScout.AppHost\AppHost.cs` now carry an explicit broker base URL into the Functions host so local Aspire runs and standalone local settings both know how to reach the broker ingress endpoint.
+- **Regression proof points:** `tests\SquadScout.Broker.Tests\PubSubUpstreamHandlerTests.cs` now covers successful forward, malformed envelopes, webhook validation, and broker conflict propagation; `tests\SquadScout.App.Tests\PubSubConnectionServiceTests.cs` now locks the app-side `event` command shape.
+
