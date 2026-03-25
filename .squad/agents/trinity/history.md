@@ -64,3 +64,9 @@
 - **Interaction polish:** The page keeps a chat-like scroll-to-latest behavior when the user is near the bottom or sends a message, while preserving grouped spacing for consecutive user messages.
 - **Validation:** `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` passed after landing the transcript UI and new app-side tests.
 
+### 2026-03-25 — PR #49 Merge Watch Blocked on Switch Review
+
+- **PR state:** GitHub shows PR #49 mergeable with `mergeable_state: clean`, but there are currently no reviews, no review comments, and no check runs on the head commit, so the approval gate has not been met.
+- **Merge choice when unblocked:** Preferred path is **squash merge** once Switch approves because the branch is 17 commits ahead of `main` and includes a merge-from-main plus squad coordination commits that would create avoidable history noise if preserved.
+- **Issue closure check:** The PR body still contains `closes #10`, so keeping the body intact at merge time will auto-close the transcript UI issue correctly.
+
