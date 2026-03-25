@@ -9,6 +9,12 @@
 
 ## Learnings
 
+- **Web PubSub Upstream Auth:** The upstream handler uses `WebPubSubUpstreamAuthenticator` which supports both `WebHook-Signature` (HMAC-SHA256) and Managed Identity (Easy Auth).
+- **Security Pattern:** Use `CryptographicOperations.FixedTimeEquals` for signature verification to prevent timing attacks.
+- **Azure Functions Identity:** Trusting `x-ms-client-principal-id` requires verifying `WEBSITE_INSTANCE_ID` is present to ensure the request is from the Azure platform (Easy Auth boundary).
+- **Testing:** `PubSubUpstreamHandlerTests` uses a `DelegateHttpMessageHandler` to mock `HttpClient` responses, allowing full integration-style testing of the handler logic without a real broker.
+
+
 ### Workstream Decomposition (2026-03-24)
 
 **Testing strategy is multiaxial:**
@@ -331,3 +337,20 @@
 - **Coordination:** Switch review → (on APPROVED) → Seraph merge-watch
 - **Scope:** Code quality, test coverage, build validation, merge readiness assessment
 - **Orchestration logs:** 2026-03-25T01-22-48Z-switch.md, 2026-03-25T01-22-48Z-seraph.md
+
+### Issue #51 Review — APPROVED (2026-03-25T16:38:40Z)
+
+**Artifact reviewed:** WebPubSubUpstreamAuthenticator implementation for issue #51 Web PubSub upstream authentication.
+
+**Validation evidence:**
+- Constant-time HMAC-SHA256 signature validation using CryptographicOperations.FixedTimeEquals
+- Support for both ce-signature and WebHook-Signature headers (canonical and alias per Azure CloudEvents spec)
+- Managed Identity (Easy Auth) path strictly validates WEBSITE_INSTANCE_ID presence to ensure Azure Functions host boundary
+- Comprehensive test coverage: PubSubUpstreamHandlerTests 10/10 passing (valid signatures, missing/invalid signatures, untrusted identities, OPTIONS requests, malformed payloads)
+
+**Security read:**
+- Signature derivation correctly uses ce-connectionId per Web PubSub CloudEvents contract (not body-based custom scheme)
+- Easy Auth principal trust is scoped to Azure Functions platform only; local/non-Easy-Auth envs fall back to shared access key validation
+- Request authentication runs before JSON parsing, preventing forged envelopes from reaching broker
+
+**Verdict:** **APPROVED** — implementation is production-ready. Ready for merge.
