@@ -31,7 +31,11 @@ public sealed class WebPubSubNegotiationService
         var refreshAt = expiresAt - CalculateRefreshLeadTime(TimeSpan.FromMinutes(_options.TokenLifetimeMinutes));
         var roles = CreateScopedRoles(sessionGroup);
         var autoJoinGroups = new[] { sessionGroup };
-        var userId = identity.CreateConnectionUserId(request.ParticipantKind, request.BrokerId);
+        var userId = identity.CreateConnectionUserId(
+            request.ParticipantKind,
+            request.ProjectId,
+            request.SessionId,
+            request.BrokerId);
         var accessUri = await _accessUriClient.GetClientAccessUriAsync(
             expiresAt,
             userId,
@@ -49,12 +53,6 @@ public sealed class WebPubSubNegotiationService
             ParticipantKind = request.ParticipantKind,
             BrokerId = request.BrokerId,
             SessionGroup = sessionGroup,
-            PrincipalId = identity.PrincipalId,
-            DisplayName = identity.DisplayName,
-            IdentityProvider = identity.IdentityProvider,
-            IsDevelopmentIdentity = identity.IsDevelopment,
-            Roles = roles,
-            AutoJoinGroups = autoJoinGroups,
             ExpiresAtUtc = expiresAt,
             RefreshAtUtc = refreshAt
         };

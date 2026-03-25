@@ -33,16 +33,37 @@ public sealed class NegotiationIdentityResolver
         out HttpStatusCode failureStatus,
         out string failureMessage)
     {
-        if (TryResolveEasyAuthIdentity(headers, out identity))
+        if (HasEasyAuthHeaders(headers))
         {
-            failureStatus = HttpStatusCode.OK;
-            failureMessage = string.Empty;
-            return true;
+            if (!CanTrustEasyAuthBoundary())
+            {
+                identity = new NegotiationIdentity();
+                failureStatus = HttpStatusCode.Unauthorized;
+                failureMessage = "Easy Auth identity headers are only trusted inside the Azure Functions host boundary. Use the localhost development identity when running locally.";
+                return false;
+            }
+
+            if (TryResolveEasyAuthIdentity(headers, out identity, out failureMessage))
+            {
+                failureStatus = HttpStatusCode.OK;
+                failureMessage = string.Empty;
+                return true;
+            }
+
+            failureStatus = HttpStatusCode.Unauthorized;
+            return false;
         }
 
         if (CanUseLocalDevelopmentIdentity(requestUri))
         {
             identity = ResolveLocalDevelopmentIdentity(headers);
+            if (!NegotiationIdentity.TryValidateTrustedIdentity(identity.PrincipalId, identity.IdentityProvider, out failureMessage))
+            {
+                identity = new NegotiationIdentity();
+                failureStatus = HttpStatusCode.Unauthorized;
+                return false;
+            }
+
             failureStatus = HttpStatusCode.OK;
             failureMessage = string.Empty;
             return true;
@@ -66,10 +87,7 @@ public sealed class NegotiationIdentityResolver
             return false;
         }
 
-        return requestUri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-               requestUri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
-               requestUri.Host.Equals("[::1]", StringComparison.OrdinalIgnoreCase) ||
-               requestUri.Host.Equals("::1", StringComparison.OrdinalIgnoreCase);
+        return requestUri.IsLoopback;
     }
 
     private NegotiationIdentity ResolveLocalDevelopmentIdentity(HttpHeadersCollection headers)
@@ -86,89 +104,130 @@ public sealed class NegotiationIdentityResolver
         };
     }
 
-    private static bool TryResolveEasyAuthIdentity(HttpHeadersCollection headers, out NegotiationIdentity identity)
+    private static bool TryResolveEasyAuthIdentity(
+        HttpHeadersCollection headers,
+        out NegotiationIdentity identity,
+        out string validationError)
     {
         var principalId = GetHeaderValue(headers, ClientPrincipalIdHeaderName);
         var displayName = GetHeaderValue(headers, ClientPrincipalNameHeaderName);
         var identityProvider = GetHeaderValue(headers, ClientPrincipalIdentityProviderHeaderName);
+        var principalHeader = GetHeaderValue(headers, ClientPrincipalHeaderName);
+        NegotiationIdentity? payloadIdentity = null;
 
-        if (string.IsNullOrWhiteSpace(principalId) &&
-            TryReadPrincipalPayload(headers, out var payloadIdentity))
+        if (!string.IsNullOrWhiteSpace(principalHeader) &&
+            !TryReadPrincipalPayload(principalHeader, out payloadIdentity, out validationError))
         {
-            identity = payloadIdentity;
-            return true;
+            identity = new NegotiationIdentity();
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(principalId) && payloadIdentity is null)
+        {
+            identity = new NegotiationIdentity();
+            validationError = "The Easy Auth identity boundary did not include a principal identifier.";
+            return false;
         }
 
         if (string.IsNullOrWhiteSpace(principalId))
         {
-            identity = new NegotiationIdentity();
-            return false;
+            identity = payloadIdentity!;
+            return NegotiationIdentity.TryValidateTrustedIdentity(identity.PrincipalId, identity.IdentityProvider, out validationError);
         }
 
         identity = new NegotiationIdentity
         {
-            PrincipalId = principalId,
-            DisplayName = string.IsNullOrWhiteSpace(displayName) ? principalId : displayName,
-            IdentityProvider = string.IsNullOrWhiteSpace(identityProvider) ? "aad" : identityProvider,
+            PrincipalId = principalId.Trim(),
+            DisplayName = string.IsNullOrWhiteSpace(displayName) ? principalId.Trim() : displayName.Trim(),
+            IdentityProvider = string.IsNullOrWhiteSpace(identityProvider)
+                ? payloadIdentity?.IdentityProvider ?? "aad"
+                : identityProvider.Trim(),
             IsDevelopment = false
         };
 
-        return true;
-    }
-
-    private static bool TryReadPrincipalPayload(HttpHeadersCollection headers, out NegotiationIdentity identity)
-    {
-        var principalHeader = GetHeaderValue(headers, ClientPrincipalHeaderName);
-        if (string.IsNullOrWhiteSpace(principalHeader))
+        if (!NegotiationIdentity.TryValidateTrustedIdentity(identity.PrincipalId, identity.IdentityProvider, out validationError))
         {
             identity = new NegotiationIdentity();
             return false;
         }
 
+        if (payloadIdentity is not null && !identity.MatchesAuthenticatedPrincipal(payloadIdentity))
+        {
+            identity = new NegotiationIdentity();
+            validationError = "Easy Auth identity headers did not match the authenticated principal payload.";
+            return false;
+        }
+
+        validationError = string.Empty;
+        return true;
+    }
+
+    private static bool TryReadPrincipalPayload(
+        string principalHeader,
+        out NegotiationIdentity identity,
+        out string validationError)
+    {
         try
         {
             var json = Encoding.UTF8.GetString(Convert.FromBase64String(NormalizeBase64(principalHeader)));
             var payload = JsonSerializer.Deserialize<ClientPrincipalPayload>(json, PrincipalOptions);
-            if (payload?.Claims is null)
+            if (payload is null)
             {
                 identity = new NegotiationIdentity();
+                validationError = "The Easy Auth principal payload was missing required claims.";
                 return false;
             }
 
-            var principalId = GetClaimValue(payload.Claims, "http://schemas.microsoft.com/identity/claims/objectidentifier")
+            var principalId = payload.UserId
+                ?? GetClaimValue(payload.Claims, "http://schemas.microsoft.com/identity/claims/objectidentifier")
                 ?? GetClaimValue(payload.Claims, "oid")
+                ?? GetClaimValue(payload.Claims, "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")
                 ?? GetClaimValue(payload.Claims, "sub");
 
             if (string.IsNullOrWhiteSpace(principalId))
             {
                 identity = new NegotiationIdentity();
+                validationError = "The Easy Auth principal payload did not include a supported Entra principal identifier.";
                 return false;
             }
 
             identity = new NegotiationIdentity
             {
-                PrincipalId = principalId,
+                PrincipalId = principalId.Trim(),
                 DisplayName = GetClaimValue(payload.Claims, "name")
                     ?? GetClaimValue(payload.Claims, "preferred_username")
-                    ?? principalId,
-                IdentityProvider = GetClaimValue(payload.Claims, "http://schemas.microsoft.com/identity/claims/identityprovider")
+                    ?? principalId.Trim(),
+                IdentityProvider = payload.IdentityProvider
+                    ?? payload.AuthenticationType
+                    ?? GetClaimValue(payload.Claims, "http://schemas.microsoft.com/identity/claims/identityprovider")
                     ?? "aad",
                 IsDevelopment = false
             };
 
-            return true;
+            return NegotiationIdentity.TryValidateTrustedIdentity(identity.PrincipalId, identity.IdentityProvider, out validationError);
         }
         catch (FormatException)
         {
             identity = new NegotiationIdentity();
+            validationError = "The Easy Auth principal payload was not valid base64.";
             return false;
         }
         catch (JsonException)
         {
             identity = new NegotiationIdentity();
+            validationError = "The Easy Auth principal payload was not valid JSON.";
             return false;
         }
     }
+
+    private static bool HasEasyAuthHeaders(HttpHeadersCollection headers) =>
+        headers.Contains(ClientPrincipalHeaderName) ||
+        headers.Contains(ClientPrincipalIdHeaderName) ||
+        headers.Contains(ClientPrincipalNameHeaderName) ||
+        headers.Contains(ClientPrincipalIdentityProviderHeaderName);
+
+    private static bool CanTrustEasyAuthBoundary() =>
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WEBSITE_INSTANCE_ID"));
 
     private static string? GetClaimValue(IReadOnlyCollection<ClientPrincipalClaim> claims, string type) =>
         claims.FirstOrDefault(claim =>
@@ -192,6 +251,15 @@ public sealed class NegotiationIdentityResolver
 
     private sealed record ClientPrincipalPayload
     {
+        [JsonPropertyName("auth_typ")]
+        public string? AuthenticationType { get; init; }
+
+        [JsonPropertyName("identityProvider")]
+        public string? IdentityProvider { get; init; }
+
+        [JsonPropertyName("userId")]
+        public string? UserId { get; init; }
+
         public IReadOnlyCollection<ClientPrincipalClaim> Claims { get; init; } = [];
     }
 

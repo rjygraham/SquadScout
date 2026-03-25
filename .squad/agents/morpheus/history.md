@@ -100,3 +100,11 @@
 
 **Impact:** Issue #3 remains unmerged; Phase 2 grain activation is blocked. No implementation bug found; coverage is the sole blocker. Morpheus is resting during Link's correction iteration.
 
+### Issue #12 Token Validation & Session Claims Hardening (2026-03-25)
+
+- **Easy Auth headers are only trustworthy inside the Azure Function boundary.** Local or non-Azure requests must not be allowed to self-assert `x-ms-client-principal*` headers; use the localhost development identity path instead.
+- **Header/payload consistency is the tamper check worth preserving.** When Easy Auth provides both direct headers and the base64 principal payload, negotiate should reject mismatched principal/provider data instead of silently preferring one source.
+- **Session scope belongs in the issued connection identity, not just the requested group name.** Encoding `{participantKind, projectId, sessionId, optional brokerId, principalId}` into the PubSub `userId` narrows replay/overreach blast radius and gives downstream components a stable authorization breadcrumb.
+- **Client tokens should not self-select broker affinity before routing exists.** Rejecting `brokerId` on client negotiate requests prevents callers from minting narrower-but-unvetted subgroup identities ahead of issue #14.
+- **Negotiate responses should stay minimal.** Echoing internal roles or Entra identity metadata back to the caller was unnecessary for current clients and widened the contract surface without adding security value.
+
