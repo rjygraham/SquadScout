@@ -271,3 +271,11 @@
 - **Coverage read:** `SessionRelayPipelineTests` now prove both the successful accepted-stop overlap and the deterministic failing-stop overlap, including the `session_stop_failed` path staying blocked behind the shared gate before input can resume.
 - **Verdict:** **APPROVED** — reviewer blocker is closed. Remaining merge notes are operational only: GitHub has no configured checks on PR #44, and the PR currently reports `mergeable_state: dirty`, so merge should wait for branch reconciliation if needed.
 
+
+### PR #47 Review Kickoff (2026-03-25T01:22:48Z)
+
+- **Event:** PR #47 review activation with parallel Seraph merge-watch contingent on approval
+- **Requested by:** Ryan Graham
+- **Coordination:** Switch review → (on APPROVED) → Seraph merge-watch
+- **Scope:** Code quality, test coverage, build validation, merge readiness assessment
+- **Orchestration logs:** 2026-03-25T01-22-48Z-switch.md, 2026-03-25T01-22-48Z-seraph.md
