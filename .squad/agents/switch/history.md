@@ -96,6 +96,49 @@
 
 **Impact:** Blocks Phase 2 grain activation and replay buffer. Message envelope is critical path; decision gate remains locked until both blockers resolved.
 
+### PR #57 Review (feature/issue-17-session-telemetry-diagnostics) — APPROVED (2026-03-26)
+
+**Scope:** Issue #17 (Phase 1 Session Telemetry & Replay Diagnostics) — Final PR review for merge approval
+
+**Implementation verified:**
+- 126/126 tests pass (app + broker)
+- Clean build with zero warnings or errors
+- All claimed coverage areas validated through direct code inspection
+
+**Failure-mode coverage confirmed:**
+- Replay buffer overflow with gap detection (`BrokerPhase1DatapathGateTests.InputEndpointReturnsSuccessForGapDetectedClientInputAndStillWritesToPty`)
+- Secret redaction in telemetry export (`BrokerPhase1DatapathGateTests.TelemetryEndpointExportsSecretSafeSessionDiagnostics`, `SessionTelemetrySnapshotTests.ExportTelemetryRedactsSensitivePayloadPreview`)
+- Generation reset boundary detection (`InMemorySessionOrchestratorReplayTests.ReplayReturnsResetBoundaryWhenGenerationChanges`)
+- Gap-aware warning status (200 OK, not 409 Conflict)
+- Client forward failure tracking with exception capture
+- Heartbeat exclusion from replay buffer (`InMemorySessionOrchestratorReplayTests.ReplayDetectsOverflowAndSkipsHeartbeatControlFrames`)
+
+**Observability additions verified:**
+- `SessionTelemetryBuffer<T>` circular buffer (capacity: 32 envelopes, 64 events)
+- `SessionTelemetrySnapshot` export with `RecentEnvelopes`, `RecentEvents`, `ReplayBuffer` telemetry
+- Broker telemetry export endpoint (`GET /api/sessions/{sessionId}/telemetry`)
+- Structured logging for gap detection (Warning level, includes expected/received/ack context)
+- App-side recent traffic tracking for client diagnostics
+
+**Security baseline maintained:**
+- All secret redaction patterns validated (`SecretRedactor` handles passwords, tokens, JWTs, Authorization headers, connection strings, credentialed URIs, GitHub PATs)
+- No raw payload logging in production paths
+- Payload previews truncated to 512 characters with redaction applied
+
+**Phase 1 gate completion verified:**
+- Full input → PTY → replay → telemetry round-trip covered in `BrokerPhase1DatapathGateTests`
+- Client reconnect/replay path tested in `PubSubConnectionServiceTests`
+- Session lifecycle event tracking proven in orchestrator tests
+
+**Verdict:** ✅ **APPROVED** — PR #57 meets all Switch charter requirements. Failure-mode coverage is explicit and complete. Telemetry export is secret-safe. Phase 1 diagnostics baseline is now production-ready. Cleared for merge.
+
+**Non-blocking observations:**
+- Telemetry export endpoint has no rate limiting (acceptable for Phase 1, defer to Phase 2 if needed)
+- Circular buffer sizes are reasonable for diagnostic purposes (32 envelopes, 64 events)
+- Logger is optional dependency in orchestrator (uses NullLogger fallback when not provided)
+
+**Next:** Ryan or Neo can merge PR #57 to main. Issue #17 closes on merge.
+
 ### Issue #17 Landing Review — APPROVED (2026-03-25)
 
 **Scope:** Issue #17 (Phase 1 Session Telemetry & Replay Diagnostics)
@@ -433,4 +476,12 @@
 - **Focused coverage added:** `BrokerPhase1DatapathGateTests` now proves the HTTP validation export carries generation + gap context, `InMemorySessionOrchestratorReplayTests` proves replay responses keep correlation/causation plus available-window metadata, and `PubSubConnectionServiceTests` proves the app traffic hook captures replay diagnostics, redacts secrets, and stays bounded.
 - **Determinism note:** The token-refresh transport test was flaky because it released the controlled delay before the refresh loop had actually scheduled it. Waiting for `RequestedDelays.Count == 1` before release keeps the full app suite stable.
 - **Validation:** Focused broker/app diagnostics runs passed, then `dotnet test .\SquadScout.slnx --no-restore --verbosity minimal` passed cleanly (122/122).
+
+### Issue #17 Landing Team Coordination (2026-03-25T21:41:50Z)
+
+- **Gate role:** Executed acceptance review on completed Issue #17 implementation (Neo's branch, all 126 tests passing).
+- **Verdict:** ✅ **APPROVED FOR MERGE** — All Phase 1 diagnostics acceptance criteria verified green. No blocking gaps remain.
+- **Verification summary:** Broker replay buffer publishes metadata ✅ | Client-side tracking complete ✅ | Generation reset boundary correct ✅ | Correlation IDs stable ✅ | Secret-safe redaction comprehensive ✅ | Test coverage 122/122 passing ✅.
+- **Cross-team coordination:** Neo (landing execution), Link (diagnostics contract), Morpheus (hardening + security review), Scribe (decision consolidation). All sign-offs in place.
+- **Next:** Orchestration log recorded (2026-03-25T21-41-50Z-switch.md). Session log: 2026-03-25T21-41-50Z-issue-17-landing.md. Ready to merge PR #57 on Lead approval.
 

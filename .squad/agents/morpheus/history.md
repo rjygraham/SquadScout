@@ -277,3 +277,12 @@
 - **Client generation reset accepts backward movement.** `ProcessGroupMessageAsync` resets to ANY different generation, including lower values. Stale transport messages could regress client state. Non-blocking for Phase 1 but must be fixed in Phase 2.
 - **Test baseline moved from 100 to 114** (28 App + 86 Broker). Decision note in `.squad/decisions/inbox/morpheus-issue-16-risks.md`.
 - **Key file paths:** `src\SquadScout.App\Services\MessagingConnectionService.cs` (client replay gap at line ~503), `src\SquadScout.Broker\Sessions\SequenceValidationResult.cs` (IsAccepted predicate), `src\SquadScout.Broker\Sessions\InMemorySessionOrchestrator.cs` (AcceptClientMessageAsync gap-drop at line ~107).
+
+### Issue #17 Landing Team Coordination (2026-03-25T21:41:50Z)
+
+- **Security & performance role:** Reviewed completed Issue #17 implementation against Phase 1 telemetry baseline requirements.
+- **Verdict:** ✅ **CONDITIONAL APPROVE** — Phase 1 telemetry and diagnostics baseline is sufficient. One minor hardening applied during review; no blocking gaps.
+- **Hardening executed:** `InMemorySessionOrchestrator.AcceptClientMessageAsync` gap-detection logging enriched to include `ProjectId`, `Generation`, `MessageId`, `CorrelationId` (previously only `SessionId`, expected/received). Rationale: multi-project debugging requires generation context to identify failure source.
+- **All acceptance criteria verified:** Sequence/replay context ✅ | Stable correlation IDs ✅ | Secret-safe output ✅ | Minimal Phase 1 scope ✅ | Test coverage 87 broker + 31 app ✅.
+- **Pre-existing non-blocking issues documented:** Token refresh flakiness (timing), client gap-detected silently dropped (Phase 2), client generation accepts backward movement (Phase 2).
+- **Cross-team sign-off:** Neo (landing), Switch (acceptance), Link (diagnostics contract), Scribe (decision consolidation). Broker tests 87/87 ✅. Full regression 122/122 ✅. Hardening included in feature branch. Ready for merge.

@@ -129,3 +129,11 @@
 - **Key learning:** When working tree has completed issue work but issue is already closed, **reopen the issue** rather than create a new one if the scope aligns. The reopening provides clear traceability and respects the original backlog item numbering.
 - **Pattern:** Product/test changes in issue-aligned PRs; .squad bookkeeping commits separately on main. Keeps PR focused and avoids squad metadata churn in code review.
 
+### 2026-03-25T21:41:50Z — Issue #17 Landing Team Coordination
+
+- **Orchestration outcome:** Neo executed landing strategy (reopened #17, feature branch, PR #57 "Closes #17", 126/126 tests passing). Switch conducted acceptance review and approved for merge. Link validated diagnostics architecture seam. Morpheus applied hardening (gap-detection log enrichment) and approved with condition. Scribe consolidated decisions.
+- **Key decision:** Broker session runtime as authoritative Phase 1 diagnostics source. Lightweight JSON export seam (`GET /api/sessions/{sessionId}/telemetry`). Reuse existing correlation fields; avoid parallel model.
+- **Hardening:** Broker gap-detection logging enriched to include ProjectId, Generation, MessageId, CorrelationId for multi-project replay debugging.
+- **Team sign-offs:** Neo (landing), Link (diagnostics contract), Morpheus (security ✅), Switch (acceptance ✅). No blocking gaps remain for Phase 1 scope.
+- **Next:** Merge PR #57 and prepare Phase 2 handoff (Issue #2, Orleans clustering). Session log: 2026-03-25T21-41-50Z-issue-17-landing.md.
+

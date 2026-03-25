@@ -194,3 +194,10 @@
 - **Proof path:** `tests\SquadScout.Broker.Tests\SessionTelemetrySnapshotTests.cs`, `BrokerPhase1DatapathGateTests.cs`, and `SecurityBaselineTests.cs` now cover replay-gap export context, generation-reset telemetry, HTTP export behavior, and secret redaction.
 - **Validation:** Focused broker diagnostics tests passed (40/40), followed by `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` passing for the full solution.
 
+### Issue #17 Landing Team Coordination (2026-03-25T21:41:50Z)
+
+- **Architect role:** Validated Issue #17 diagnostics architecture against Phase 1 requirements. Broker session runtime as authoritative source. Lightweight JSON export seam (`GET /api/sessions/{sessionId}/telemetry`). Reuse existing correlation fields without parallel model.
+- **Follow-on constraints verified:** Secret-safety enforced ✅. Buffers stay bounded ✅. Future app/admin surfaces will consume broker-authored export ✅.
+- **Cross-team alignment:** Neo (landing execution), Switch (acceptance gate), Morpheus (hardening review), Scribe (decision consolidation). All validation greens converged.
+- **Session log:** 2026-03-25T21-41-50Z-issue-17-landing.md. Orchestration: 2026-03-25T21-41-50Z-switch.md (gate), 2026-03-25T21-41-50Z-neo.md (execution). Decision inbox merged and cleared. Ready for Phase 2 handoff.
+
