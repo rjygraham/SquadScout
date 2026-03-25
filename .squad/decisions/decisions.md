@@ -90,3 +90,48 @@ Merge commit (`--no-ff`) preserves feature branch history and documents feature 
 ### Next Phase
 
 WS-2 kickoff: Await Switch team message envelope contract finalization. Link will provide endpoint configuration; Morpheus will validate tokens in session initiation flow.
+
+---
+
+## Issue #12 / PR #45 — Token Validation & Session Claims Hardening Merge
+
+**Timestamp:** 2026-03-25T00:45:00Z  
+**Decision Owner:** Morpheus (Merge Decision)  
+**Verdict:** **MERGE (Squash)**
+
+### Reviewed Artifact
+
+- Issue: #12
+- PR: #45
+- Branch: `squad/12-token-validation-session-claims-hardening`
+- Implementation commit: `5e7f232`
+
+### Merge Readiness
+
+- ✅ No review blockers
+- ✅ No merge conflicts
+- ✅ Mergeable state: Clean
+- ✅ Build: ✅ Green
+- ✅ Tests: ✅ 14/14 (focused), 61/61 (full)
+- ✅ Security validation: Confirmed
+
+### Security Review Highlights
+
+- Proper fail-closed Easy Auth handling
+- Header tampering rejection enforced
+- Broker scoping validation in place
+- Session isolation confirmed
+- Response hygiene validated
+
+### Merge Strategy Rationale
+
+**Strategy: Squash**
+- Single logical unit (token validation middleware + session claims hardening)
+- Encapsulates WS-2 token validation workstream
+- Reduces main branch fragmentation
+- Minimizes downstream conflict surface
+- Preserves closure semantic: GitHub auto-closes issue #12
+
+### Merge Outcome
+
+✅ Ready for merge. Issue #12 closure gates Phase 1 security hardening.
