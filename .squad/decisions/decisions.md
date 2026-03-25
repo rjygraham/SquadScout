@@ -135,3 +135,61 @@ WS-2 kickoff: Await Switch team message envelope contract finalization. Link wil
 ### Merge Outcome
 
 ✅ Ready for merge. Issue #12 closure gates Phase 1 security hardening.
+
+---
+
+## Issue #13 / PR #44 — Broker Session Start/Stop Endpoints Final Re-Review
+
+**Timestamp:** 2026-03-25T01:10:35Z  
+**Reviewer:** Switch  
+**Verdict:** **APPROVED** (subject to branch reconciliation)
+
+### Reviewed Artifact
+
+- Issue: #13
+- PR: #44
+- Branch: `squad/13-broker-session-start-stop-endpoints`
+- Implementation commit: `27aa9e1`
+
+### Verification Results
+
+- `dotnet build .\SquadScout.slnx -nologo` ✅
+- Focused: `dotnet test .\tests\SquadScout.Broker.Tests\SquadScout.Broker.Tests.csproj -nologo --filter "FullyQualifiedName~SessionRelayPipelineTests"` ✅ 10/10 passed
+- `dotnet test .\SquadScout.slnx -nologo --no-build` ✅ 61/61 passed
+
+### What Is Good
+
+- Gate-protection enforced on both success and failure paths
+- `StopAsync(...)` sets `_stopRequested` under shared `StopInputGate`; never clears before PTY shutdown
+- Failure path routes `TerminateAsync()` throw through `ResetStopRequest()`, which reacquires the gate before clearing `_stopRequested`
+- `RelayInputAsync(...)` checks `IsStopRequested` under same gate → accepted stop cannot reopen input during failure-recovery window
+- Deterministic regression tests prove both overlap race scenarios
+
+### Regression Test Coverage
+
+1. `StopAsyncSerializesWithAcceptedInputAndReturnsStructuredConflictForLaterInput` — accepted input completes first, later input rejected with `session_stop_in_progress`
+2. `StopAsyncFailureKeepsStopRecoveryUnderSharedGateBeforeInputCanResume` — proves stop-flag recovery holds gate across terminate failure; input cannot resume until gate reacquisition
+
+### Merge Readiness
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Reviewer bar | ✅ Satisfied | Gate-protection + regression + validation |
+| Build | ✅ Green | Local validated |
+| Tests | ✅ All passing | Focused + full |
+| Branch state | ⚠️ Dirty | GitHub reports `mergeable_state: dirty`; requires reconciliation |
+| Check runs | ℹ️ N/A | Not configured |
+
+### Merge Strategy
+
+**Strategy: Squash** (recommended)
+- Single logical unit (session lifecycle hardening)
+- Reduces main branch fragmentation
+- Preserves GitHub auto-closure of issue #13
+- Aligns with WS-2 session reliability phase gates
+
+### Next Phase
+
+- **Merge-watch agent:** Seraph
+- **Action:** Reconcile branch state, then merge to main
+- Issue #13 closure gates Phase 2 session reliability work

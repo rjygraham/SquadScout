@@ -35,3 +35,14 @@
 - Decision inbox entry (switch-issue12-review.md) merged into decisions.md and removed from inbox.
 - Morpheus activated for merge-watch mode to monitor PR #45 merge to main.
 - Merge risk assessed as LOW; caveats: GitHub check runs not configured, Azure Web PubSub integration unit/local validated only.
+
+### Issue #13 Final Re-Review & Approval Session (2026-03-25T01:10:35Z)
+
+- Switch completed final re-review of PR #44 (issue #13).
+- **Verdict: APPROVED** — Gate-protection on stop-failure recovery path confirmed, serialization invariant preserved on both success and failure branches. Build green, full test suite 61/61 passing.
+- Regression tests prove both overlap race scenarios: (1) accepted input completes first → later input rejected with `session_stop_in_progress`, (2) deterministic mock proves stop-flag recovery holds gate across terminate failure.
+- Orchestration logs written: 2026-03-25T01-10-35Z-switch.md (final verdict) and 2026-03-25T01-10-35Z-seraph.md (merge-watch kickoff).
+- Session log written to 2026-03-25T01-10-35Z-issue-13-approval.md.
+- Decision inbox entry (switch-issue13-final-rereview.md) merged into decisions.md and removed from inbox.
+- Seraph activated for merge-watch mode to monitor PR #44 merge to main.
+- Merge readiness caveat: GitHub reports `mergeable_state: dirty`; branch reconciliation required before merge even though reviewer bar satisfied.
