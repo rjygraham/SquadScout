@@ -539,3 +539,31 @@ Approved for merge. Deliverable complete: MAUI app shell ready for Phase 2 Orlea
 
 **Status:** Active — waiting for merge trigger.
 
+## Switch — Issue #31 Review Gate: Aspire / ServiceDefaults (2026-03-25T00:08:17Z)
+
+**Owner:** Switch  
+**Artifact:** Seraph's Aspire / ServiceDefaults revision (issue #31)  
+**Verdict:** REJECTED  
+
+**Blocking Findings:**
+
+1. **No PR exists** — No GitHub pull request was opened for Aspire / ServiceDefaults scope.
+2. **No implementation** — Named worktree (`seraph/issue-31-aspire-service-defaults`) at `D:\GitHub\SquadScout\.worktrees\seraph-issue-31-aspire-service-defaults` contains no diff from `origin/main`, no `AppHost` project, no `ServiceDefaults` project.
+3. **No Aspire wiring** — No `DistributedApplication`, `AddServiceDefaults()`, `UseServiceDefaults()`, or `MapDefaultEndpoints()` integration in Broker, Functions, or App hosts.
+4. **No reviewable handoff** — No Seraph implementation notes or validation report found in squad records.
+
+**Validation Performed:**
+- Baseline build/test on Seraph's named worktree: 55/55 tests pass (no regression).
+- Cross-project analysis: Broker (`Program.cs`), Functions (`Program.cs`), App (`MauiProgram.cs`) all use direct host registration with no shared OpenTelemetry or ServiceDefaults hooks.
+
+**Merge-Risk Context:**
+- Target scope spans three host models: MAUI (`net10.0` multi-target), Broker (`net10.0` web), Functions (`net8.0` isolated worker).
+- Any acceptable revision must demonstrate explicit compatibility and cross-project integration strategy for Aspire before review can proceed.
+
+**Revision Assignment:**
+- **Next owner:** Link (local host / orchestration / solution-structure expertise by routing)
+- **Rationale:** Link owns host-level changes and solution structure; best fit for introducing AppHost scaffolding and cross-project ServiceDefaults wiring.
+- **Seraph lockout:** Blocked from next revision cycle for this artifact.
+- **New worktree:** `D:\GitHub\SquadScout-31-link`
+- **New branch:** `squad/31-aspire-service-defaults-revision`
+
