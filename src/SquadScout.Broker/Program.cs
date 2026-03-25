@@ -86,6 +86,10 @@ app.MapPost("/api/sessions", async (SquadScout.Contracts.Sessions.StartSessionCo
     {
         return Results.BadRequest(new { message = ex.Message });
     }
+    catch (SessionControlException ex)
+    {
+        return SessionControlError(ex);
+    }
     catch (DirectoryNotFoundException ex)
     {
         return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "Session start failed", detail: ex.Message);
@@ -104,6 +108,27 @@ app.MapGet("/api/sessions/{sessionId}", async (string sessionId, ISessionOrchest
 {
     var session = await orchestrator.GetAsync(sessionId, cancellationToken);
     return session is null ? Results.NotFound() : Results.Ok(session);
+});
+
+app.MapPost("/api/sessions/{sessionId}/stop", async (
+    string sessionId,
+    SquadScout.Contracts.Sessions.StopSessionCommand command,
+    ISessionRelay relay,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var session = await relay.StopAsync(sessionId, command, cancellationToken);
+        return Results.Ok(session);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+    catch (SessionControlException ex)
+    {
+        return SessionControlError(ex);
+    }
 });
 
 app.MapPost("/api/sessions/{sessionId}/input", async (
@@ -127,6 +152,10 @@ app.MapPost("/api/sessions/{sessionId}/input", async (
     {
         return Results.BadRequest(new { message = ex.Message });
     }
+    catch (SessionControlException ex)
+    {
+        return SessionControlError(ex);
+    }
     catch (KeyNotFoundException ex)
     {
         return Results.NotFound(new { message = ex.Message });
@@ -138,5 +167,17 @@ app.MapPost("/api/sessions/{sessionId}/input", async (
 });
 
 app.Run();
+
+static IResult SessionControlError(SessionControlException ex) =>
+    Results.Json(
+        new
+        {
+            code = ex.Code,
+            message = ex.Message,
+            sessionId = ex.SessionId,
+            projectId = ex.ProjectId,
+            state = ex.SessionState?.ToString()
+        },
+        statusCode: ex.StatusCode);
 
 public partial class Program;

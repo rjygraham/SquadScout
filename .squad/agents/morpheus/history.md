@@ -108,3 +108,8 @@
 - **Client tokens should not self-select broker affinity before routing exists.** Rejecting `brokerId` on client negotiate requests prevents callers from minting narrower-but-unvetted subgroup identities ahead of issue #14.
 - **Negotiate responses should stay minimal.** Echoing internal roles or Entra identity metadata back to the caller was unnecessary for current clients and widened the contract surface without adding security value.
 
+### Issue #13 Revision — Stop/Input Lifecycle Hardening (2026-03-25)
+
+- **Stop acceptance must share a critical section with PTY input admission.** A stop flag check outside the write-admission gate is not enough; once stop is accepted, no later input can be allowed to cross into the PTY write path.
+- **Reuse lifecycle error codes when semantics are the same.** Rejecting input after stop acceptance should emit the existing `session_stop_in_progress` structured contract instead of inventing a second 409 code for the same transient condition.
+- **Deterministic gated PTY doubles make race regressions reviewable.** Blocking `WriteAsync()` and `TerminateAsync()` with test-controlled gates proves serialization guarantees without relying on flaky task timing.
