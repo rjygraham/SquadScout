@@ -1,5 +1,9 @@
 # Decisions
 
+## 2026-03-25
+
+- Accepted: PR #46 (Aspire / ServiceDefaults Revision) — Real Aspire entrypoint with AppHost orchestration, ServiceDefaults multi-target (net8.0;net10.0), preserved broker /health, integrated logging/resilience across Functions, Broker, and MAUI. Approved by Switch; merge-watch active. GitHub checks absent; merge risk low based on local validation (build ✅, tests 55/55 ✅, AppHost smoke ✅, broker /health ✅).
+
 ## 2026-03-24
 
 - Accepted: This repository uses a persistent Squad team with Matrix-themed agent names.
