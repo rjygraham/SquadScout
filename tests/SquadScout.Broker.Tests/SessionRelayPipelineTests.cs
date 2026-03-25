@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using SquadScout.Broker.Projects;
@@ -175,6 +176,74 @@ public sealed class SessionRelayPipelineTests
         var stopped = await stopTask;
         Assert.Equal(SessionState.Stopped, stopped.State);
         Assert.Equal(["before-stop\n"], gateablePtySession.WrittenInputs);
+    }
+
+    [Fact]
+    public async Task StopAsyncFailureKeepsStopRecoveryUnderSharedGateBeforeInputCanResume()
+    {
+        var catalog = new InMemoryProjectCatalog();
+        await catalog.UpsertAsync(new RegisteredProject
+        {
+            ProjectId = "broker",
+            DisplayName = "Broker",
+            RepositoryRoot = @"D:\GitHub\SquadScout-13"
+        });
+
+        var relayPublisher = new RecordingRelayPublisher();
+        var orchestrator = new InMemorySessionOrchestrator(relayPublisher, new SessionSequenceValidator(), replayBufferCapacity: 8);
+        var ptyHost = new GateablePtyHost();
+        await using var relay = new InMemorySessionRelay(
+            catalog,
+            orchestrator,
+            ptyHost,
+            new PtySessionEnvelopePump(orchestrator),
+            NullLogger<InMemorySessionRelay>.Instance);
+
+        var session = await relay.StartAsync(new StartSessionCommand
+        {
+            ProjectId = "broker",
+            RequestedBy = "tests"
+        });
+
+        var gateablePtySession = ptyHost.GetRequiredSession();
+        gateablePtySession.FailTerminate(new InvalidOperationException("terminate failed"));
+
+        var stopTask = relay.StopAsync(session.SessionId, new StopSessionCommand
+        {
+            ProjectId = session.ProjectId,
+            RequestedBy = "tests",
+            Reason = "user-requested-stop"
+        });
+
+        await gateablePtySession.WaitForTerminateEnteredAsync();
+
+        var stopInputGate = GetRequiredStopInputGate(relay, session.SessionId);
+        await stopInputGate.WaitAsync();
+        try
+        {
+            gateablePtySession.ReleaseTerminate();
+            await gateablePtySession.WaitForTerminateFailureAsync();
+            await Assert.ThrowsAsync<TimeoutException>(() => stopTask.WaitAsync(TimeSpan.FromMilliseconds(100)));
+        }
+        finally
+        {
+            stopInputGate.Release();
+        }
+
+        var stopException = await Assert.ThrowsAsync<SessionControlException>(() => stopTask);
+        Assert.Equal("session_stop_failed", stopException.Code);
+        Assert.Equal(StatusCodes.Status500InternalServerError, stopException.StatusCode);
+        Assert.Equal(session.SessionId, stopException.SessionId);
+        Assert.Equal(session.ProjectId, stopException.ProjectId);
+        Assert.Equal(SessionState.Running, stopException.SessionState);
+
+        gateablePtySession.ReleaseWrite();
+        var validation = await relay.RelayInputAsync(
+            session.SessionId,
+            CreateInputEnvelope(session, clientSequence: 1, "after-stop-failure\n"));
+
+        Assert.Equal(SequenceValidationStatus.Accepted, validation.Status);
+        Assert.Equal(["after-stop-failure\n"], gateablePtySession.WrittenInputs);
     }
 
     [Fact]
@@ -422,6 +491,39 @@ public sealed class SessionRelayPipelineTests
             }
         };
 
+    private static SemaphoreSlim GetRequiredStopInputGate(InMemorySessionRelay relay, string sessionId)
+    {
+        ArgumentNullException.ThrowIfNull(relay);
+
+        var activeSession = GetRequiredActiveSession(relay, sessionId);
+        return (SemaphoreSlim)(activeSession.GetType()
+            .GetProperty("StopInputGate", BindingFlags.Instance | BindingFlags.Public)
+            ?.GetValue(activeSession)
+            ?? throw new InvalidOperationException("Stop input gate was not available."));
+    }
+
+    private static object GetRequiredActiveSession(InMemorySessionRelay relay, string sessionId)
+    {
+        var activeSessionsField = typeof(InMemorySessionRelay).GetField(
+            "_activeSessions",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Active relay sessions were not available.");
+
+        var activeSessions = activeSessionsField.GetValue(relay)
+            ?? throw new InvalidOperationException("Active relay sessions dictionary was not initialized.");
+
+        var tryGetValue = activeSessions.GetType().GetMethod("TryGetValue")
+            ?? throw new InvalidOperationException("Active relay session lookup was not available.");
+
+        var arguments = new object?[] { sessionId, null };
+        var found = (bool)(tryGetValue.Invoke(activeSessions, arguments)
+            ?? throw new InvalidOperationException("Active relay session lookup returned no result."));
+
+        return found
+            ? arguments[1] ?? throw new InvalidOperationException("Active relay session was missing.")
+            : throw new InvalidOperationException($"Active relay session '{sessionId}' was not found.");
+    }
+
     private sealed class RelayHarness
     {
         public RelayHarness(
@@ -475,6 +577,8 @@ public sealed class SessionRelayPipelineTests
         private readonly TaskCompletionSource _writeRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _terminateEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _terminateRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _terminateFailure = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private Exception? _terminateException;
 
         public GateablePtySession(MockPtySession inner)
         {
@@ -495,7 +599,11 @@ public sealed class SessionRelayPipelineTests
 
         public Task WaitForTerminateEnteredAsync() => _terminateEntered.Task;
 
+        public Task WaitForTerminateFailureAsync() => _terminateFailure.Task;
+
         public void ReleaseTerminate() => _terminateRelease.TrySetResult();
+
+        public void FailTerminate(Exception exception) => _terminateException = exception ?? throw new ArgumentNullException(nameof(exception));
 
         public async Task WriteAsync(string input, CancellationToken cancellationToken = default)
         {
@@ -513,6 +621,13 @@ public sealed class SessionRelayPipelineTests
         {
             _terminateEntered.TrySetResult();
             await _terminateRelease.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+            if (_terminateException is not null)
+            {
+                _terminateFailure.TrySetResult();
+                throw _terminateException;
+            }
+
             await _inner.TerminateAsync(cancellationToken).ConfigureAwait(false);
         }
 

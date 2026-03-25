@@ -130,7 +130,7 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
         {
             if (activeSession.PtySession.State != SessionState.Stopped)
             {
-                activeSession.ResetStopRequest();
+                await ResetStopRequestAsync(activeSession).ConfigureAwait(false);
             }
 
             throw new SessionControlException(
@@ -439,6 +439,19 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "PTY session disposal failed for session {SessionId}.", session.SessionId);
+        }
+    }
+
+    private static async Task ResetStopRequestAsync(ActiveRelaySession activeSession)
+    {
+        await activeSession.StopInputGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            activeSession.ResetStopRequest();
+        }
+        finally
+        {
+            activeSession.StopInputGate.Release();
         }
     }
 
