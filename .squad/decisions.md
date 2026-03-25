@@ -597,3 +597,24 @@ If mobile UX later needs a visible "stopping" phase, add that as a separate cont
 - **New worktree:** `D:\GitHub\SquadScout-31-link`
 - **New branch:** `squad/31-aspire-service-defaults-revision`
 
+
+
+## Decision: Issue #13 / PR #44 Rejection — Switch Review (2026-03-25)
+
+**Reviewer:** Switch  
+**Verdict:** REJECTED  
+**Artifact:** PR #44 — \squad/13-broker-session-start-stop-endpoints\  
+
+### Blocking Findings
+
+1. **Stop/input handoff not serialized** — Lifecycle race condition persists. InMemorySessionRelay.cs:163-173 checks IsStopRequested once then hands off to AcceptClientMessageAsync(); InMemorySessionRelay.cs:107-121 sets stop flag but never coordinates with ClientMessageGate. Result: input can slip through after stop acceptance in the exact area this review was asked to harden.
+
+2. **Stop-in-flight input rejection returns unstructured 409** — Inconsistent with established SessionControlException contract for other session-control errors. Bare InvalidOperationException thrown in InMemorySessionRelay.cs:164-166 maps to unstructured \{ message = ... }\ instead of structured payload with \code\, \sessionId\, \projectId\, \state\. Missing machine-readable error code and test coverage (concurrent stop/input overlap not covered).
+
+### Resolution
+
+- **Reassigned to:** Morpheus
+- **Reason:** Link authored; rotating reviewer for correction cycle.
+- **Lockout:** Link locked out for this revision on issue #13.
+- **Branch:** \squad/13-broker-session-start-stop-endpoints\
+- **Ready-for-approval:** (1) Serialize stop and input acceptance; (2) Return structured lifecycle conflict for stop-in-flight input rejection; (3) Add focused test coverage for concurrent stop/input scenarios.

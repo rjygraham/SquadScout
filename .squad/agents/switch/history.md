@@ -219,4 +219,11 @@
 
 **Handoff:** WS-2 token validation critical path. Morpheus awaits Switch formal review gate on PR #45. If revision needed, Link assumes ownership per team protocol.
 
+### Issue #13 Formal Review — REJECTED (2026-03-25)
 
+- **Artifact reviewed:** PR #44 / branch `squad/13-broker-session-start-stop-endpoints` at commit `bb59652`.
+- **Validation run:** `dotnet build .\SquadScout.slnx -nologo` passed, focused `SessionRelayPipelineTests` passed (8/8), and full solution tests passed (59/59).
+- **Blocking finding 1:** `InMemorySessionRelay.StopAsync(...)` and `RelayInputAsync(...)` do not share a serialization point. Input checks `IsStopRequested` before entering the orchestrator gate, so a request already in flight can still reach `WriteAsync(...)` after stop has been accepted.
+- **Blocking finding 2:** stop-related input rejection returns a generic 409 `{ message }` via `InvalidOperationException` instead of the new structured `SessionControlException` shape. That leaves future clients without a stable machine-readable lifecycle code for the "stopping" case.
+- **Coverage gap that matters:** `SessionRelayPipelineTests` prove completed-stop, already-exited, and project-mismatch behavior, but do not exercise stop-in-flight input rejection or concurrent stop overlap. For lifecycle work, happy-path stop coverage is not enough.
+- **Recommended next reviser:** Morpheus. Link authored the artifact and should sit out the next correction cycle.
