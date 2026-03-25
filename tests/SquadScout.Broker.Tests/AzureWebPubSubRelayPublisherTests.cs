@@ -43,7 +43,8 @@ public sealed class AzureWebPubSubRelayPublisherTests
         using var document = JsonDocument.Parse(publication.JsonPayload);
         Assert.Equal("proj-01", document.RootElement.GetProperty("projectId").GetString());
         Assert.Equal("session-abc", document.RootElement.GetProperty("sessionId").GetString());
-        Assert.Equal("output", document.RootElement.GetProperty("messageType").GetString());
+        // Enums now serialize as numbers
+        Assert.Equal((int)SessionMessageType.Output, document.RootElement.GetProperty("messageType").GetInt32());
     }
 
     private sealed record Publication(string SessionGroup, string JsonPayload);

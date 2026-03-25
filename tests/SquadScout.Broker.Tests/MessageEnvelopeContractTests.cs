@@ -34,11 +34,14 @@ public sealed class MessageEnvelopeContractTests
 
         Assert.Equal(SessionEnvelopeContract.CurrentVersion, root.GetProperty("contractVersion").GetInt32());
         Assert.Equal(7, root.GetProperty("generation").GetInt64());
-        Assert.Equal("heartbeat", root.GetProperty("messageType").GetString());
-        Assert.Equal("brokerToClient", root.GetProperty("direction").GetString());
+        // Enums now serialize as numbers
+        Assert.Equal((int)SessionMessageType.Heartbeat, root.GetProperty("messageType").GetInt32());
+        Assert.Equal((int)MessageDirection.BrokerToClient, root.GetProperty("direction").GetInt32());
         Assert.Equal(41, root.GetProperty("acknowledgedSequence").GetInt64());
         Assert.False(root.TryGetProperty("sequence", out _));
         Assert.False(root.TryGetProperty("clientSequence", out _));
+        // Timestamps now serialize as Unix milliseconds
+        Assert.Equal(1774375200000, root.GetProperty("timestampUtc").GetInt64());
         Assert.Equal(30, root.GetProperty("payload").GetProperty("expectedIntervalSeconds").GetInt32());
         Assert.Equal("broker-local", root.GetProperty("payload").GetProperty("senderInstanceId").GetString());
     }
@@ -246,5 +249,117 @@ public sealed class MessageEnvelopeContractTests
         Assert.Null(envelope.CausationId);
         Assert.Equal(30, envelope.Payload.ExpectedIntervalSeconds);
         Assert.True(envelope.Payload.ReplayRequested);
+    }
+
+    [Fact]
+    public void OptimizedFormatsDeserializeCorrectly()
+    {
+        // Test numeric enums and Unix milliseconds
+        const string json = """
+            {
+              "contractVersion": 1,
+              "projectId": "test-project",
+              "sessionId": "test-session",
+              "generation": 5,
+              "messageType": 5,
+              "direction": 1,
+              "acknowledgedSequence": 42,
+              "timestampUtc": 1774375200000,
+              "messageId": "pty-test-42",
+              "correlationId": "client-test-41",
+              "payload": {
+                "replayRequested": false,
+                "expectedIntervalSeconds": 30,
+                "senderInstanceId": "broker-1"
+              }
+            }
+            """;
+
+        var envelope = JsonSerializer.Deserialize<MessageEnvelope<HeartbeatPayload>>(json, SessionMessageSerializer.DefaultOptions);
+
+        Assert.NotNull(envelope);
+        Assert.Equal(SessionMessageType.Heartbeat, envelope.MessageType);
+        Assert.Equal(MessageDirection.BrokerToClient, envelope.Direction);
+        Assert.Equal(DateTimeOffset.Parse("2026-03-24T18:00:00+00:00"), envelope.TimestampUtc);
+        Assert.Equal("pty-test-42", envelope.MessageId);
+        Assert.Equal("client-test-41", envelope.CorrelationId);
+    }
+
+    [Fact]
+    public void LegacyFormatsDeserializeCorrectlyForBackwardCompatibility()
+    {
+        // Test string enums, ISO8601 timestamps, and RFC4122 GUIDs
+        const string json = """
+            {
+              "contractVersion": 1,
+              "projectId": "test-project",
+              "sessionId": "test-session",
+              "generation": 5,
+              "messageType": "heartbeat",
+              "direction": "brokerToClient",
+              "acknowledgedSequence": 42,
+              "timestampUtc": "2026-03-24T18:00:00+00:00",
+              "messageId": "01234567-89ab-cdef-0123-456789abcdef",
+              "correlationId": "fedcba98-7654-3210-fedc-ba9876543210",
+              "causationId": "11111111-2222-3333-4444-555555555555",
+              "payload": {
+                "replayRequested": false,
+                "expectedIntervalSeconds": 30,
+                "senderInstanceId": "broker-1"
+              }
+            }
+            """;
+
+        var envelope = JsonSerializer.Deserialize<MessageEnvelope<HeartbeatPayload>>(json, SessionMessageSerializer.DefaultOptions);
+
+        Assert.NotNull(envelope);
+        Assert.Equal(SessionMessageType.Heartbeat, envelope.MessageType);
+        Assert.Equal(MessageDirection.BrokerToClient, envelope.Direction);
+        Assert.Equal(DateTimeOffset.Parse("2026-03-24T18:00:00+00:00"), envelope.TimestampUtc);
+        Assert.Equal("01234567-89ab-cdef-0123-456789abcdef", envelope.MessageId);
+        Assert.Equal("fedcba98-7654-3210-fedc-ba9876543210", envelope.CorrelationId);
+        Assert.Equal("11111111-2222-3333-4444-555555555555", envelope.CausationId);
+    }
+
+    [Fact]
+    public void MessageSizesAreReducedByOptimizations()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-03-24T18:00:00+00:00");
+        
+        var envelope = new MessageEnvelope<HeartbeatPayload>
+        {
+            ProjectId = "broker",
+            SessionId = "session-123",
+            Generation = 7,
+            MessageType = SessionMessageType.Heartbeat,
+            Direction = MessageDirection.BrokerToClient,
+            AcknowledgedSequence = 41,
+            TimestampUtc = timestamp,
+            // Use the actual ID format used in the codebase (string prefixes, not GUIDs)
+            MessageId = "pty-session-123-42",
+            CorrelationId = "client-session-123-41",
+            Payload = new HeartbeatPayload
+            {
+                ReplayRequested = false,
+                ExpectedIntervalSeconds = 30,
+                SenderInstanceId = "broker-local"
+            }
+        };
+
+        var json = JsonSerializer.Serialize(envelope, SessionMessageSerializer.DefaultOptions);
+
+        // Verify enums are numeric (not strings) - saves 2-5%
+        Assert.Contains("\"messageType\":5", json);
+        Assert.Contains("\"direction\":1", json);
+        Assert.DoesNotContain("heartbeat", json);
+        Assert.DoesNotContain("brokerToClient", json);
+
+        // Verify timestamps are Unix milliseconds (not ISO8601) - saves 2-3%
+        Assert.Contains("\"timestampUtc\":1774375200000", json);
+        Assert.DoesNotContain("2026-03-24T18:00:00", json);
+
+        // Verify overall size is reasonable (should be under 300 bytes for heartbeat)
+        // With numeric enums and Unix timestamps, typical heartbeat is ~280-290 bytes
+        Assert.True(json.Length < 350, $"Heartbeat message size {json.Length} bytes should be under 350 bytes");
     }
 }
