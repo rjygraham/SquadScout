@@ -25,6 +25,8 @@
     <Compile Include="..\..\src\SquadScout.App\Configuration\AppConfiguration.cs" Link="App\Configuration\AppConfiguration.cs" />
     <Compile Include="..\..\src\SquadScout.App\Services\ServiceContracts.cs" Link="App\Services\ServiceContracts.cs" />
     <Compile Include="..\..\src\SquadScout.App\Services\BrokerBackedMobileServices.cs" Link="App\Services\BrokerBackedMobileServices.cs" />
+    <Compile Include="..\..\src\SquadScout.App\ViewModels\SessionTranscriptState.cs" Link="App\ViewModels\SessionTranscriptState.cs" />
+    <Compile Include="..\..\src\SquadScout.App\ViewModels\SessionTranscriptController.cs" Link="App\ViewModels\SessionTranscriptController.cs" />
   </ItemGroup>
 
 </Project>
