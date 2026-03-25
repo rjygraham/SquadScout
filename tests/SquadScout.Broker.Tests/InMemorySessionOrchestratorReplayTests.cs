@@ -158,6 +158,44 @@ public sealed class InMemorySessionOrchestratorReplayTests
         Assert.Contains("project id", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task ReplayReturnsResetBoundaryWhenFutureGenerationRequested()
+    {
+        var orchestrator = new InMemorySessionOrchestrator(new NullRelayPublisher(), new SessionSequenceValidator());
+        var session = await StartSessionAsync(orchestrator);
+
+        await orchestrator.RecordBrokerMessageAsync(
+            session.SessionId,
+            CreateBrokerCommand(SessionMessageType.Output, "broker-output-1", "corr-future", new { text = "current-gen" }));
+
+        // Request replay for a generation that does not yet exist.
+        var replay = await orchestrator.ReplayAsync(
+            session.SessionId,
+            new MessageEnvelope<ReplayRequestPayload>
+            {
+                ProjectId = session.ProjectId,
+                SessionId = session.SessionId,
+                Generation = SessionEnvelopeContract.InitialGeneration + 99,
+                MessageType = SessionMessageType.ReplayRequest,
+                Direction = MessageDirection.ClientToBroker,
+                ClientSequence = 1,
+                MessageId = "client-replay-future",
+                CorrelationId = "corr-future",
+                Payload = new ReplayRequestPayload
+                {
+                    FromSequenceInclusive = 1,
+                    Reason = ReplayRequestReason.ReconnectResume
+                }
+            });
+
+        Assert.Equal(SessionEnvelopeContract.InitialGeneration, replay.Generation);
+        Assert.Equal(SessionEnvelopeContract.InitialGeneration, replay.Payload.Generation);
+        Assert.True(replay.Payload.GapDetected);
+        Assert.Equal(1, replay.Payload.AvailableFromSequence);
+        Assert.Equal(1, replay.Payload.AvailableToSequence);
+        Assert.Empty(replay.Payload.Messages);
+    }
+
     private static async Task<SessionDescriptor> StartSessionAsync(InMemorySessionOrchestrator orchestrator) =>
         await orchestrator.StartAsync(new StartSessionCommand
         {

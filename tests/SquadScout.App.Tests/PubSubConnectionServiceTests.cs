@@ -86,6 +86,67 @@ public sealed class PubSubConnectionServiceTests
     }
 
     [Fact]
+    public async Task ReceiveLoopTracksGenerationGapAndUsesRecoveredBrokerAckForLaterInput()
+    {
+        var session = CreateSession();
+        var socket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-003")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        await using var service = CreateService(new RecordingNegotiationClient(CreateNegotiationResponse(session)), socket);
+        await service.PrepareForSessionAsync(session);
+
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1)));
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 3)));
+        await WaitForAsync(() => service.RecentTraffic.Count == 2);
+
+        Assert.Equal(MessageTrafficDirection.Incoming, service.RecentTraffic[0].Direction);
+        Assert.Equal(1, service.RecentTraffic[0].Envelope.Sequence);
+        Assert.Equal(3, service.RecentTraffic[1].Envelope.Sequence);
+        Assert.Contains("sequence gap", service.CurrentStatus.Summary, StringComparison.OrdinalIgnoreCase);
+
+        await service.SendInputAsync("after-gap");
+        await WaitForAsync(() => service.RecentTraffic.Count == 3);
+
+        using (var firstSendCommand = JsonDocument.Parse(socket.SentTexts[1]))
+        {
+            var firstEnvelope = firstSendCommand.RootElement.GetProperty("data")
+                .Deserialize<MessageEnvelope<JsonElement>>(SessionMessageSerializer.DefaultOptions);
+
+            Assert.NotNull(firstEnvelope);
+            Assert.Equal(SessionEnvelopeContract.InitialGeneration, firstEnvelope!.Generation);
+            Assert.Equal(1, firstEnvelope.AcknowledgedSequence);
+            Assert.Equal(1, firstEnvelope.ClientSequence);
+        }
+
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1, generation: 2)));
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 2, generation: 2)));
+        await WaitForAsync(() => service.RecentTraffic.Count == 5);
+
+        await service.SendInputAsync("after-recovery");
+        await WaitForAsync(() => service.RecentTraffic.Count == 6);
+
+        using var secondSendCommand = JsonDocument.Parse(socket.SentTexts[2]);
+        var secondEnvelope = secondSendCommand.RootElement.GetProperty("data")
+            .Deserialize<MessageEnvelope<JsonElement>>(SessionMessageSerializer.DefaultOptions);
+
+        Assert.NotNull(secondEnvelope);
+        Assert.Equal(2, secondEnvelope!.Generation);
+        Assert.Equal(2, secondEnvelope.AcknowledgedSequence);
+        Assert.Equal(2, secondEnvelope.ClientSequence);
+    }
+
+    [Fact]
     public async Task ReconnectAsyncReNegotiatesAfterUnexpectedDisconnect()
     {
         var session = CreateSession();
@@ -183,6 +244,80 @@ public sealed class PubSubConnectionServiceTests
         Assert.Equal("seraph@local", Assert.Single(displayNames));
     }
 
+    [Fact]
+    public async Task ReceivingBrokerMessagesWithSequenceGapSetsGapDetectedStatus()
+    {
+        var session = CreateSession();
+        var socket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-gap")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        var service = CreateService(new RecordingNegotiationClient(CreateNegotiationResponse(session)), socket);
+        await service.PrepareForSessionAsync(session);
+
+        // Deliver sequence 1, then skip 2 and deliver 3 to produce a gap.
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1)));
+        await WaitForAsync(() => service.RecentTraffic.Count == 1);
+
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 3)));
+        await WaitForAsync(() =>
+            service.RecentTraffic.Count >= 2 &&
+            service.CurrentStatus.Summary.Contains("gap", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ReceivingNewGenerationResetsClientAcknowledgementState()
+    {
+        var session = CreateSession();
+        var socket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-gen")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        var service = CreateService(new RecordingNegotiationClient(CreateNegotiationResponse(session)), socket);
+        await service.PrepareForSessionAsync(session);
+
+        // Establish acknowledged state at generation 1.
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1)));
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 2)));
+        await WaitForAsync(() => service.RecentTraffic.Count == 2);
+
+        // Deliver a message from generation 2 (simulates broker PTY restart).
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1, generation: 2)));
+        await WaitForAsync(() => service.RecentTraffic.Count == 3);
+
+        // After the generation reset, the next input must echo generation 2 and ack sequence 1 (not 2).
+        await service.SendInputAsync("hello");
+        await WaitForAsync(() => service.RecentTraffic.Count == 4);
+
+        using var sendCommand = JsonDocument.Parse(socket.SentTexts[1]);
+        var envelope = sendCommand.RootElement.GetProperty("data")
+            .Deserialize<MessageEnvelope<JsonElement>>(SessionMessageSerializer.DefaultOptions);
+
+        Assert.NotNull(envelope);
+        Assert.Equal(2, envelope!.Generation);
+        Assert.Equal(1, envelope.AcknowledgedSequence);
+    }
+
     private static SessionDescriptor CreateSession() =>
         new()
         {
@@ -206,12 +341,15 @@ public sealed class PubSubConnectionServiceTests
             RefreshAtUtc = DateTimeOffset.UtcNow.AddMinutes(50)
         };
 
-    private static MessageEnvelope<OutputChunkPayload> CreateBrokerEnvelope(SessionDescriptor session, long sequence) =>
+    private static MessageEnvelope<OutputChunkPayload> CreateBrokerEnvelope(
+        SessionDescriptor session,
+        long sequence,
+        long generation = SessionEnvelopeContract.InitialGeneration) =>
         new()
         {
             ProjectId = session.ProjectId,
             SessionId = session.SessionId,
-            Generation = SessionEnvelopeContract.InitialGeneration,
+            Generation = generation,
             MessageType = SessionMessageType.Output,
             Direction = MessageDirection.BrokerToClient,
             Sequence = sequence,

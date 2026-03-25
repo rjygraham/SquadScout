@@ -103,6 +103,99 @@ public sealed class SessionSequenceValidatorTests
         Assert.Equal(5, result.ExpectedClientSequence);
     }
 
+    [Fact]
+    public void DuplicateDoesNotAdvanceAcknowledgementBeyondSnapshot()
+    {
+        // A retransmitted duplicate may carry a higher ack than the snapshot's current value.
+        // The validator must apply the max so cumulative acks remain monotonic, but the
+        // snapshot ack must never regress. This proves the idempotent ack path is safe.
+        var result = _validator.Validate(
+            new SessionSequencingSnapshot(
+                SessionEnvelopeContract.InitialGeneration,
+                LastBrokerSequence: 10,
+                LastClientSequence: 3,
+                AcknowledgedSequence: 5),
+            CreateClientHeartbeat(clientSequence: 3, acknowledgedSequence: 7));
+
+        Assert.Equal(SequenceValidationStatus.Duplicate, result.Status);
+        Assert.True(result.IsAccepted);
+        Assert.Equal(7, result.AppliedAcknowledgedSequence);
+    }
+
+    [Fact]
+    public void GapDetectedDoesNotAdvanceAcknowledgement()
+    {
+        // When client sequence has a gap, the ack carried on the envelope is intentionally
+        // ignored. This prevents a reordered gap-frame from advancing the ack past the
+        // point where the broker can still detect the gap on the missing frame.
+        var result = _validator.Validate(
+            new SessionSequencingSnapshot(
+                SessionEnvelopeContract.InitialGeneration,
+                LastBrokerSequence: 10,
+                LastClientSequence: 2,
+                AcknowledgedSequence: 4),
+            CreateClientHeartbeat(clientSequence: 5, acknowledgedSequence: 8));
+
+        Assert.Equal(SequenceValidationStatus.GapDetected, result.Status);
+        Assert.False(result.IsAccepted);
+        Assert.Equal(4, result.AppliedAcknowledgedSequence);
+    }
+
+    [Fact]
+    public void RejectsBrokerToClientEnvelopeDirection()
+    {
+        var result = _validator.Validate(
+            new SessionSequencingSnapshot(
+                SessionEnvelopeContract.InitialGeneration,
+                LastBrokerSequence: 5,
+                LastClientSequence: null,
+                AcknowledgedSequence: null),
+            new MessageEnvelope<HeartbeatPayload>
+            {
+                ProjectId = "broker",
+                SessionId = "session-123",
+                Generation = SessionEnvelopeContract.InitialGeneration,
+                MessageType = SessionMessageType.Heartbeat,
+                Direction = MessageDirection.BrokerToClient,
+                ClientSequence = 1,
+                MessageId = "broker-1",
+                CorrelationId = "corr-heartbeat",
+                Payload = new HeartbeatPayload()
+            });
+
+        Assert.Equal(SequenceValidationStatus.InvalidEnvelope, result.Status);
+        Assert.False(result.IsAccepted);
+        Assert.Contains("client-to-broker", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RejectsClientEnvelopeWithBrokerOwnedSequence()
+    {
+        var result = _validator.Validate(
+            new SessionSequencingSnapshot(
+                SessionEnvelopeContract.InitialGeneration,
+                LastBrokerSequence: 5,
+                LastClientSequence: null,
+                AcknowledgedSequence: null),
+            new MessageEnvelope<HeartbeatPayload>
+            {
+                ProjectId = "broker",
+                SessionId = "session-123",
+                Generation = SessionEnvelopeContract.InitialGeneration,
+                MessageType = SessionMessageType.Heartbeat,
+                Direction = MessageDirection.ClientToBroker,
+                Sequence = 10,
+                ClientSequence = 1,
+                MessageId = "client-1",
+                CorrelationId = "corr-heartbeat",
+                Payload = new HeartbeatPayload()
+            });
+
+        Assert.Equal(SequenceValidationStatus.InvalidEnvelope, result.Status);
+        Assert.False(result.IsAccepted);
+        Assert.Contains("broker-owned", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static MessageEnvelope<HeartbeatPayload> CreateClientHeartbeat(
         long clientSequence,
         long acknowledgedSequence,
