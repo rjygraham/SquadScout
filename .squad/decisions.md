@@ -618,3 +618,49 @@ If mobile UX later needs a visible "stopping" phase, add that as a separate cont
 - **Lockout:** Link locked out for this revision on issue #13.
 - **Branch:** \squad/13-broker-session-start-stop-endpoints\
 - **Ready-for-approval:** (1) Serialize stop and input acceptance; (2) Return structured lifecycle conflict for stop-in-flight input rejection; (3) Add focused test coverage for concurrent stop/input scenarios.
+
+
+## Decision: Aspire / ServiceDefaults Revision — Link Implementation (2026-03-25)
+
+# Link — Aspire revision decision
+
+## Context
+
+Issue #31's prior Aspire artifact was rejected because it did not hand off a real implementation. This revision needed a clean, Link-owned implementation that respected the existing framework split: broker + MAUI on `net10.0`, Azure Functions isolated worker on `net8.0`.
+
+## Decision
+
+- Use one shared `src\SquadScout.ServiceDefaults` project, but multi-target it to `net8.0;net10.0`.
+- Keep the shared defaults focused on cross-app concerns that work for all three app types: OpenTelemetry logging/tracing/metrics exporters, service discovery registration, and default HttpClient resilience wiring.
+- Keep ASP.NET Core-specific health checks and inbound request instrumentation in `src\SquadScout.Broker` instead of forcing `Microsoft.AspNetCore.App` into the MAUI build graph.
+- Orchestrate the backend services with `src\SquadScout.AppHost` using `AddProject<...>("broker")` and `AddAzureFunctionsProject<...>("functions")`.
+- Register the MAUI client in AppHost with `AddMauiProject(...).AddWindowsDevice()` and feed the broker base URL through Aspire-managed environment/config instead of treating the MAUI app as a normal server resource.
+
+## Rationale
+
+This keeps the revision cohesive and close to current Aspire ecosystem guidance while avoiding the two biggest compatibility traps in this repo: Functions isolated-worker startup and MAUI's non-server deployment model. It also preserves current broker behavior by keeping `/health` stable and only layering observability/orchestration concerns around the existing endpoints.
+
+
+## Decision: Issue #12 Token Validation Review — Switch Approval (2026-03-25)
+
+**Verdict:** APPROVED
+
+# Switch Review — Issue #12 / PR #45
+
+- **Verdict:** **APPROVED**
+- **Artifact reviewed:** PR #45 / branch `squad/12-token-validation-session-claims-hardening` at commit `5e7f232`
+- **Validation run:** `dotnet build .\SquadScout.slnx -nologo`, focused `dotnet test .\tests\SquadScout.Broker.Tests\SquadScout.Broker.Tests.csproj -nologo --filter PubSubNegotiateEndpointTests --no-build`, and `dotnet test .\SquadScout.slnx -nologo --no-build` all passed in `D:\GitHub\SquadScout-12` (14/14 focused, 61/61 full).
+
+## Review Read
+
+- Easy Auth headers now fail closed outside the Azure Functions host boundary; localhost development identity remains the only non-Easy-Auth path and does not accept spoofed Easy Auth headers.
+- Header/payload tampering is rejected when the trusted principal headers and decoded Easy Auth payload disagree on principal id or identity provider.
+- Client negotiate requests can no longer self-assert `brokerId`; only broker-scoped requests may carry that segment.
+- PubSub `userId` values are now scoped to participant + project + session + optional broker + principal, which keeps session isolation coherent with the `session:{projectId}:{sessionId}[:brokerId]` group contract.
+- The public negotiate response no longer echoes principal details, roles, or auto-join groups, and there is no checked-in downstream consumer that depends on the removed fields.
+
+## Merge-Risk Notes
+
+- No GitHub check runs are configured on PR #45 right now, so merge confidence is based on the local build/test evidence above.
+- Coverage is targeted and unit-focused; no live Azure Web PubSub integration probe exists yet, so first deployment should watch for environment-specific token issuance behavior.
+
