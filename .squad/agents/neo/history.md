@@ -148,3 +148,23 @@
 - **Routing:** Confirm assignment to Seraph (Cloud/Auth Dev domain match). Secondary recommendation: Link-owned follow-up for scripted Entra app registration (out of Bicep but needed for turnkey deployment).
 - **Key Insight:** Temptation exists to speculate on future Orleans/distributed features in IaC. Decision: focus on what current code requires. Phase 2 Orleans state will require new resources; don't assume them now.
 
+### 2026-03-25 — Phase 1 Backlog Additions: Issues #58 & #59 Created
+
+- **Context:** User requested two items for Phase 1: (1) message compression for Web PubSub cost reduction, (2) WorkingDirectory should use repo root per project.
+- **Specialist findings:** Seraph confirmed item 1 is real new work (11-20% message size reduction via backward-compatible serialization). Link confirmed item 2 already implemented; remaining gap is documentation/logging clarity.
+- **Decision:** Created Issue #58 (real implementation: cost optimization, owner: Seraph, medium priority) and Issue #59 (clarification: documentation/logging, owner: Link, low priority). Avoided duplicate implementation issue for already-existing functionality.
+- **Key learning:** Distinguish implementation from clarification work. When functionality already exists, create honest clarification/observability issues rather than false missing-feature issues.
+- **Compliance:** Both issues carry `squad` + owner labels + `phase:1`. Standing directive (all new work needs GitHub issues) satisfied.
+- **Decision file:** `.squad/decisions/inbox/neo-phase1-additions.md`.
+
+
+### 2026-03-25: Phase 1 Backlog Additions Processed (Orchestration Log)
+
+**Status:** GitHub issues #58 and #59 created and documented.
+
+- **Issue #58:** Phase 1: Optimize Web PubSub outbound message contract (owner: Seraph, type: Implementation)
+- **Issue #59:** Phase 1: Clarify CopilotPtyHostOptions.WorkingDirectory (owner: Link, type: Clarification)
+- **Decision Framework:** All new work tracked as issues; no duplicate issues for already-existing functionality
+- **Key Learning:** Honest issue framing sets correct implementer expectations; clarification/observability work is legitimate Phase 1 scope
+
+**Next:** Monitor both issues for cross-cutting concerns; no coordination dependencies identified.

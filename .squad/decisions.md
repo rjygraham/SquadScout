@@ -850,3 +850,78 @@ All six state categories are coherently handled:
 ### Decision
 
 **APPROVE merge.** The PR satisfies Issue #15's requirements, aligns with all accepted user directives, introduces no regressions, and the architecture is clean for future reconnect/voice extensions.
+
+## 2026-03-25 (Continued)
+
+### Phase 1 Cost Optimization: Web PubSub Outbound Message Size Reduction
+
+**Decision Date:** 2026-03-25  
+**Owner:** Seraph  
+**Related Issue:** #58 (Phase 1: Optimize Web PubSub outbound message contract for cost reduction)
+
+**Context:** User request to add Phase 1 backlog item for reducing Web PubSub outbound message costs via contract minimization. Azure Web PubSub bills by quantity of messages sent outbound; reducing message size = lower costs for same message volume.
+
+**Analysis:**
+- Current envelope: 13 fields + typed payload
+- Enums serialize as strings (e.g., "heartbeat" vs numeric 5)
+- GUIDs use full 36-character RFC4122 format
+- Timestamps use RFC3339 format (25 characters)
+- Overhead contributors: field names (50-65%), GUIDs (15-20%), timestamps (5-8%), enums (2-5%)
+
+**Proposed Phase 1 Approach: Incremental Minimization**
+
+Three safe levers (ranked by ROI):
+1. **Numeric Enum Serialization** (2-5% reduction): "heartbeat" → 5 (~15-30 bytes/message)
+2. **GUID Base64 Compression** (7-12% reduction): 36 chars → 22 chars (~42 bytes/message)
+3. **Unix Timestamp Format** (2-3% reduction): RFC3339 → milliseconds (~12 bytes/message)
+
+**Combined Impact:** 11-20% message size reduction
+
+**Backward Compatibility:** Preserved via dual-format deserialization
+
+**Decision:** APPROVED for Phase 1 with staged rollout. Low to medium risk when staged properly. Issue #58 created.
+
+---
+
+### Phase 1 WorkingDirectory Clarification: CopilotPtyHostOptions Behavior
+
+**Decision Date:** 2026-03-25  
+**Owner:** Link  
+**Related Issue:** #59 (Phase 1: Clarify CopilotPtyHostOptions.WorkingDirectory semantics and logging)
+
+**Context:** Assessment revealed functionality already exists and works correctly. Remaining work is observability only.
+
+**Gap Analysis:**
+1. Enhance logging in CopilotPtyHost.ResolveWorkingDirectory to show which source was used
+2. Add XML documentation on CopilotPtyHostOptions.WorkingDirectory clarifying fallback semantics
+3. Add appsettings.json comments explaining per-project behavior
+
+**Effort Estimate:** XS (1-2 hours) — documentation and logging enhancement only; no behavioral changes.
+
+**Decision:** APPROVED as low-priority Phase 1 clarification issue. Honest framing: functionality exists; work is observability/maintainability improvement only. Issue #59 created.
+
+---
+
+### Phase 1 Backlog Alignment: GitHub Issues #58 and #59 Created
+
+**Decision Date:** 2026-03-25  
+**Owner:** Neo  
+**Related Issues:** #58 (implementation), #59 (clarification)
+
+**Summary:** Two GitHub issues created to align Phase 1 backlog with user request:
+- Issue #58: Implementation (message cost optimization)
+- Issue #59: Clarification (working directory observability)
+
+**Compliance:**
+- ✅ All new work has GitHub issues
+- ✅ No duplicate issues created for already-existing functionality
+- ✅ Honest issue framing sets correct implementer expectations
+- ✅ Squad routing labels applied to both issues
+- ✅ Phase alignment documented
+
+**Key Learnings:**
+1. Distinguish implementation from clarification to avoid false duplication
+2. Backward-compatible optimizations belong in Phase 1 when staged properly
+3. Document findings honestly to set correct expectations
+
+**Decision:** Phase 1 backlog additions documented and tracked. No cross-cutting dependencies identified.

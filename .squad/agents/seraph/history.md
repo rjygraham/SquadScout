@@ -112,3 +112,15 @@ MAUI App Shell complete (cross-platform, chat UI, 36 tests passing). PR #43 in r
 - **Targeted cloud diagnostics improved:** upstream auth failures and broker-forwarding failures now log `projectId`, `sessionId`, derived `sessionGroup`, `messageId`, and `ce-connectionId`, while `src\SquadScout.Functions\NegotiateFunction.cs` logs the concrete negotiate auth rejection status/message instead of a generic boundary warning.
 - **Explicit cloud assumption recorded:** Phase 1 upstream input still assumes the base session group only; broker-affinity ingress will require a future envelope or route contract that carries `brokerId` before Functions can validate broker-scoped groups end to end.
 - **Regression proof extended:** `tests\SquadScout.Broker.Tests\PubSubUpstreamHandlerTests.cs` now covers rejection of envelopes that cannot map to a legal Phase 1 session group, giving the datapath gate a repeatable cloud-side failure case.
+
+### 2026-03-25: Phase 1 Cost Optimization Analysis Complete (Orchestration Log)
+
+**Status:** Issue #58 created for Phase 1 backlog.
+
+- **Analysis:** Comprehensive cost-impact and risk assessment for Web PubSub outbound message optimization
+- **Backward Compatibility:** Dual-format deserialization designed in from start
+- **ROI:** High for production (15% billing savings); medium for Phase 1 local dev
+- **Staged Rollout:** Numeric enums → Unix timestamps → base64 GUIDs minimizes risk
+- **Key Learning:** Three safe optimization levers exist; backward compatibility preserves client flexibility
+
+**Next:** Seraph can begin Issue #58 implementation with staged approach.
