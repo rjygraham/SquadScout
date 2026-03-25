@@ -263,3 +263,11 @@
 - **Coverage gap that matters:** the new deterministic regression test only covers successful stop completion; no failing-stop / `session_stop_failed` overlap test guards the remaining race.
 - **Recommended next reviser:** Seraph. Link authored the original rejected revision, Morpheus authored this rejected correction, so the next cycle should move to a third agent with lifecycle ownership.
 
+### Issue #13 Final Re-Review — APPROVED (2026-03-25)
+
+- **Artifact reviewed:** PR #44 / branch `squad/13-broker-session-start-stop-endpoints` at commit `27aa9e1`.
+- **Validation run:** `dotnet build .\SquadScout.slnx -nologo`, focused `SessionRelayPipelineTests` (10/10), and full solution tests (61/61) all passed in `D:\GitHub\SquadScout-13`.
+- **Race-condition read:** `InMemorySessionRelay.StopAsync(...)` now routes terminate-failure recovery through `ResetStopRequestAsync(...)`, which reacquires `StopInputGate` before clearing `_stopRequested`; `RelayInputAsync(...)` uses the same gate for admission, so accepted stop no longer reopens input on the failure path.
+- **Coverage read:** `SessionRelayPipelineTests` now prove both the successful accepted-stop overlap and the deterministic failing-stop overlap, including the `session_stop_failed` path staying blocked behind the shared gate before input can resume.
+- **Verdict:** **APPROVED** — reviewer blocker is closed. Remaining merge notes are operational only: GitHub has no configured checks on PR #44, and the PR currently reports `mergeable_state: dirty`, so merge should wait for branch reconciliation if needed.
+
