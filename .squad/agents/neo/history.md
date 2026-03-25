@@ -93,3 +93,11 @@
 - **Team routing confirmed:** Seraph (#6), Trinity (#7), Morpheus (#8), Link (#9) have branches staged with no surprises.
 - **Key learning:** Staged branches maintained clean rebase discipline during Phase 1A. All downstream work dependencies were satisfied before branch creation, so no rebasing churn needed. Recommendation: maintain this pattern for Phase 2 (Orleans grains will be staged against Phase 1B completion).
 
+### 2026-03-25 — PR #50 Merged; Security Issue #51 Opened for Signature Validation
+
+- **PR #50 status:** "Complete Web PubSub inbound session routing" merged to main (commit `29933f3`). PR closed issue #14 (session group membership). Switch review approved with mandatory follow-up.
+- **Security finding (Issue #51):** WebPubSubUpstreamFunction endpoint accepts `AuthorizationLevel.Anonymous` requests but does not validate the `WebHook-Signature` header. This allows untrusted clients to forge upstream events and inject arbitrary session input. The handler validates envelope shape and message type but skips cryptographic authentication.
+- **Issue #51 scope:** Validate `WebHook-Signature` before deserialization, reject unauthenticated POST with 401, keep OPTIONS CORS-compatible, add comprehensive tests (valid/missing/invalid signatures), document configuration for local dev.
+- **Routing:** Issue #51 assigned to Seraph (Cloud/Auth Dev) with phase:1 label; coordinate with AppHost/Aspire for managed identity if used.
+- **Pattern observed:** PR-review-found security gaps are surfaced as mandatory follow-ups before public exposure. This is the correct gate; include signature validation as part of Phase 1 security baseline (WS-6).
+
