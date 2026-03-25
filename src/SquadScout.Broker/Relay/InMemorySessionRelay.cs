@@ -104,15 +104,21 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
 
         EnsureProjectMatches(command.ProjectId, activeSession.PtySession.ProjectId, session.SessionId, session.State);
 
-        if (!activeSession.TryBeginStop())
+        await activeSession.StopInputGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            throw new SessionControlException(
-                "session_stop_in_progress",
-                StatusCodes.Status409Conflict,
-                $"Session '{session.SessionId}' is already stopping for project '{session.ProjectId}'.",
-                session.SessionId,
-                session.ProjectId,
-                session.State);
+            if (!activeSession.TryBeginStop())
+            {
+                throw CreateStopInProgressException(
+                    session.SessionId,
+                    session.ProjectId,
+                    session.State,
+                    $"Session '{session.SessionId}' is already stopping for project '{session.ProjectId}'.");
+            }
+        }
+        finally
+        {
+            activeSession.StopInputGate.Release();
         }
 
         try
@@ -161,16 +167,29 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
         }
 
         var activeSession = await GetRequiredActiveSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
-        if (activeSession.IsStopRequested)
-        {
-            throw new InvalidOperationException($"Session '{sessionId}' is stopping and no longer accepts input.");
-        }
 
-        return await _orchestrator.AcceptClientMessageAsync(
-            sessionId,
-            envelope,
-            (acceptedEnvelope, token) => activeSession.PtySession.WriteAsync(acceptedEnvelope.Payload.Content, token),
-            cancellationToken).ConfigureAwait(false);
+        await activeSession.StopInputGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (activeSession.IsStopRequested)
+            {
+                throw CreateStopInProgressException(
+                    activeSession.PtySession.SessionId,
+                    activeSession.PtySession.ProjectId,
+                    activeSession.PtySession.State,
+                    $"Session '{sessionId}' is stopping and no longer accepts input.");
+            }
+
+            return await _orchestrator.AcceptClientMessageAsync(
+                sessionId,
+                envelope,
+                (acceptedEnvelope, token) => activeSession.PtySession.WriteAsync(acceptedEnvelope.Payload.Content, token),
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            activeSession.StopInputGate.Release();
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -188,6 +207,10 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to dispose relay session {SessionId}.", activeSession.PtySession.SessionId);
+            }
+            finally
+            {
+                activeSession.Dispose();
             }
         }
     }
@@ -334,6 +357,19 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
             session.State);
     }
 
+    private static SessionControlException CreateStopInProgressException(
+        string sessionId,
+        string projectId,
+        SessionState sessionState,
+        string message) =>
+        new(
+            "session_stop_in_progress",
+            StatusCodes.Status409Conflict,
+            message,
+            sessionId,
+            projectId,
+            sessionState);
+
     private async Task RunPumpLoopAsync(string sessionId, ActiveRelaySession activeSession)
     {
         try
@@ -362,6 +398,7 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
         {
             _activeSessions.TryRemove(sessionId, out _);
             await SafeDisposeAsync(activeSession.PtySession).ConfigureAwait(false);
+            activeSession.Dispose();
         }
     }
 
@@ -405,8 +442,9 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
         }
     }
 
-    private sealed class ActiveRelaySession
+    private sealed class ActiveRelaySession : IDisposable
     {
+        private int _disposed;
         private int _stopRequested;
 
         public ActiveRelaySession(IPtySession ptySession)
@@ -418,10 +456,22 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
 
         public Task PumpTask { get; set; } = Task.CompletedTask;
 
+        public SemaphoreSlim StopInputGate { get; } = new(1, 1);
+
         public bool IsStopRequested => Volatile.Read(ref _stopRequested) == 1;
 
         public bool TryBeginStop() => Interlocked.CompareExchange(ref _stopRequested, 1, 0) == 0;
 
         public void ResetStopRequest() => Interlocked.Exchange(ref _stopRequested, 0);
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 1)
+            {
+                return;
+            }
+
+            StopInputGate.Dispose();
+        }
     }
 }

@@ -113,6 +113,71 @@ public sealed class SessionRelayPipelineTests
     }
 
     [Fact]
+    public async Task StopAsyncSerializesWithAcceptedInputAndReturnsStructuredConflictForLaterInput()
+    {
+        var catalog = new InMemoryProjectCatalog();
+        await catalog.UpsertAsync(new RegisteredProject
+        {
+            ProjectId = "broker",
+            DisplayName = "Broker",
+            RepositoryRoot = @"D:\GitHub\SquadScout-13"
+        });
+
+        var relayPublisher = new RecordingRelayPublisher();
+        var orchestrator = new InMemorySessionOrchestrator(relayPublisher, new SessionSequenceValidator(), replayBufferCapacity: 8);
+        var ptyHost = new GateablePtyHost();
+        await using var relay = new InMemorySessionRelay(
+            catalog,
+            orchestrator,
+            ptyHost,
+            new PtySessionEnvelopePump(orchestrator),
+            NullLogger<InMemorySessionRelay>.Instance);
+
+        var session = await relay.StartAsync(new StartSessionCommand
+        {
+            ProjectId = "broker",
+            RequestedBy = "tests"
+        });
+
+        var gateablePtySession = ptyHost.GetRequiredSession();
+        var firstInput = relay.RelayInputAsync(session.SessionId, CreateInputEnvelope(session, clientSequence: 1, "before-stop\n"));
+        await gateablePtySession.WaitForWriteEnteredAsync();
+
+        var stopTask = relay.StopAsync(session.SessionId, new StopSessionCommand
+        {
+            ProjectId = session.ProjectId,
+            RequestedBy = "tests",
+            Reason = "user-requested-stop"
+        });
+
+        Assert.False(stopTask.IsCompleted);
+
+        gateablePtySession.ReleaseWrite();
+
+        var firstValidation = await firstInput;
+        Assert.Equal(SequenceValidationStatus.Accepted, firstValidation.Status);
+
+        await gateablePtySession.WaitForTerminateEnteredAsync();
+
+        var exception = await Assert.ThrowsAsync<SessionControlException>(() => relay.RelayInputAsync(
+            session.SessionId,
+            CreateInputEnvelope(session, clientSequence: 2, "after-stop-accepted\n")));
+
+        Assert.Equal("session_stop_in_progress", exception.Code);
+        Assert.Equal(StatusCodes.Status409Conflict, exception.StatusCode);
+        Assert.Equal(session.SessionId, exception.SessionId);
+        Assert.Equal(session.ProjectId, exception.ProjectId);
+        Assert.Equal(SessionState.Running, exception.SessionState);
+        Assert.Contains("no longer accepts input", exception.Message, StringComparison.OrdinalIgnoreCase);
+
+        gateablePtySession.ReleaseTerminate();
+
+        var stopped = await stopTask;
+        Assert.Equal(SessionState.Stopped, stopped.State);
+        Assert.Equal(["before-stop\n"], gateablePtySession.WrittenInputs);
+    }
+
+    [Fact]
     public async Task RelayInputAsyncRejectsInactiveSessionsAfterPtyExit()
     {
         var harness = await CreateHarnessAsync();
@@ -386,5 +451,71 @@ public sealed class SessionRelayPipelineTests
                 PtyHost,
                 new PtySessionEnvelopePump(Orchestrator),
                 NullLogger<InMemorySessionRelay>.Instance);
+    }
+
+    private sealed class GateablePtyHost : IPtyHost
+    {
+        private GateablePtySession? _session;
+
+        public Task<IPtySession> StartSessionAsync(PtySessionStartRequest request, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _session = new GateablePtySession(new MockPtySession(request));
+            return Task.FromResult<IPtySession>(_session);
+        }
+
+        public GateablePtySession GetRequiredSession() =>
+            _session ?? throw new InvalidOperationException("The gateable PTY session has not been created yet.");
+    }
+
+    private sealed class GateablePtySession : IPtySession
+    {
+        private readonly MockPtySession _inner;
+        private readonly TaskCompletionSource _writeEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _writeRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _terminateEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _terminateRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public GateablePtySession(MockPtySession inner)
+        {
+            _inner = inner;
+        }
+
+        public string SessionId => _inner.SessionId;
+
+        public string ProjectId => _inner.ProjectId;
+
+        public SessionState State => _inner.State;
+
+        public IReadOnlyList<string> WrittenInputs => _inner.WrittenInputs;
+
+        public Task WaitForWriteEnteredAsync() => _writeEntered.Task;
+
+        public void ReleaseWrite() => _writeRelease.TrySetResult();
+
+        public Task WaitForTerminateEnteredAsync() => _terminateEntered.Task;
+
+        public void ReleaseTerminate() => _terminateRelease.TrySetResult();
+
+        public async Task WriteAsync(string input, CancellationToken cancellationToken = default)
+        {
+            _writeEntered.TrySetResult();
+            await _writeRelease.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await _inner.WriteAsync(input, cancellationToken).ConfigureAwait(false);
+        }
+
+        public bool TryReadEvent(out PtySessionEvent @event) => _inner.TryReadEvent(out @event);
+
+        public ValueTask<PtySessionEvent> ReadEventAsync(CancellationToken cancellationToken = default) =>
+            _inner.ReadEventAsync(cancellationToken);
+
+        public async Task TerminateAsync(CancellationToken cancellationToken = default)
+        {
+            _terminateEntered.TrySetResult();
+            await _terminateRelease.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await _inner.TerminateAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        public ValueTask DisposeAsync() => _inner.DisposeAsync();
     }
 }
