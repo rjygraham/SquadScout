@@ -69,6 +69,7 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\SquadScout.Contracts\SquadScout.Contracts.csproj" />
+		<ProjectReference Include="..\SquadScout.ServiceDefaults\SquadScout.ServiceDefaults.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

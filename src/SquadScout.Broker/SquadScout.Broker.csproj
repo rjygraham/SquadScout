@@ -8,9 +8,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SquadScout.Contracts\SquadScout.Contracts.csproj" />
+    <ProjectReference Include="..\SquadScout.ServiceDefaults\SquadScout.ServiceDefaults.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.0" />
     <PackageReference Include="sch.pty.net" Version="0.3.36-pre" GeneratePathProperty="true" />
   </ItemGroup>
 
@@ -19,10 +21,7 @@
       <PtyNetNativeFiles Include="$(Pkgsch_pty_net)\build\$(PlatformTarget)\**\*" />
     </ItemGroup>
 
-    <Copy
-      SourceFiles="@(PtyNetNativeFiles)"
-      DestinationFiles="@(PtyNetNativeFiles->'$(OutDir)%(RecursiveDir)%(Filename)%(Extension)')"
-      SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(PtyNetNativeFiles)" DestinationFiles="@(PtyNetNativeFiles->'$(OutDir)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
 </Project>
