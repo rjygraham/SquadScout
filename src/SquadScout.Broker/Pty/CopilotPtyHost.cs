@@ -97,18 +97,37 @@ public sealed class CopilotPtyHost : IPtyHost
 
     private string ResolveWorkingDirectory(PtySessionStartRequest request)
     {
-        var workingDirectory = !string.IsNullOrWhiteSpace(request.WorkingDirectory)
-            ? request.WorkingDirectory
-            : !string.IsNullOrWhiteSpace(_options.WorkingDirectory)
-                ? _options.WorkingDirectory
-                : Environment.CurrentDirectory;
+        string workingDirectory;
+        string source;
+
+        if (!string.IsNullOrWhiteSpace(request.WorkingDirectory))
+        {
+            workingDirectory = request.WorkingDirectory;
+            source = "project repository root";
+        }
+        else if (!string.IsNullOrWhiteSpace(_options.WorkingDirectory))
+        {
+            workingDirectory = _options.WorkingDirectory;
+            source = "broker default configuration";
+        }
+        else
+        {
+            workingDirectory = Environment.CurrentDirectory;
+            source = "current broker process directory";
+        }
 
         if (!Directory.Exists(workingDirectory))
         {
             throw new DirectoryNotFoundException($"The PTY working directory '{workingDirectory}' does not exist.");
         }
 
-        return Path.GetFullPath(workingDirectory);
+        var resolvedPath = Path.GetFullPath(workingDirectory);
+        _logger.LogInformation(
+            "Using working directory from {Source}: {WorkingDirectory}",
+            source,
+            resolvedPath);
+
+        return resolvedPath;
     }
 
     private Dictionary<string, string> CreateEnvironment(PtySessionStartRequest request)
