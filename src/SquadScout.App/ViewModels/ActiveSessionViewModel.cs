@@ -47,8 +47,11 @@ public sealed class ActiveSessionViewModel : ViewModelBase
         RefreshStatusCommand = new AsyncCommand(RefreshStatusAsync, () => HasActiveSession && CanRefreshFromBroker && !IsBusy);
         ReturnToProjectsCommand = new AsyncCommand(ReturnToProjectsAsync, () => !IsBusy);
         ClearLocalShellContextCommand = new AsyncCommand(ClearLocalShellContextAsync, () => HasActiveSession && !IsBusy);
+        ReconnectLiveTransportCommand = new AsyncCommand(ReconnectLiveTransportAsync, () => HasActiveSession && !IsBusy);
 
         _activeSessionState.Changed += (_, snapshot) => ApplySnapshot(snapshot);
+        _messageConnectionService.StatusChanged += (_, status) =>
+            MainThread.BeginInvokeOnMainThread(() => MessagingSummary = status.Summary);
 
         StatusMessage = "Session control will render here once a pending session is active.";
         ApplySnapshot(_activeSessionState.GetSnapshot());
@@ -106,6 +109,8 @@ public sealed class ActiveSessionViewModel : ViewModelBase
         get => _projectRoot;
         private set => SetProperty(ref _projectRoot, value);
     }
+
+    public IAsyncCommand ReconnectLiveTransportCommand { get; }
 
     public IAsyncCommand RefreshStatusCommand { get; }
 
@@ -218,6 +223,38 @@ public sealed class ActiveSessionViewModel : ViewModelBase
         RefreshStatusCommand.RaiseCanExecuteChanged();
         ReturnToProjectsCommand.RaiseCanExecuteChanged();
         ClearLocalShellContextCommand.RaiseCanExecuteChanged();
+        ReconnectLiveTransportCommand.RaiseCanExecuteChanged();
+    }
+
+    private async Task ReconnectLiveTransportAsync()
+    {
+        if (!HasActiveSession)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        RefreshCommands();
+
+        try
+        {
+            var status = await _messageConnectionService.ReconnectAsync();
+            MessagingSummary = status.Summary;
+            StatusMessage = status.Summary;
+            ErrorMessage = status.State == MessageConnectionState.Faulted
+                ? status.FailureReason ?? status.Summary
+                : string.Empty;
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+            RefreshCommands();
+        }
     }
 
     private async Task RefreshStatusAsync()

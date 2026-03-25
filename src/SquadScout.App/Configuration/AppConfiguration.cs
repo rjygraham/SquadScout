@@ -68,6 +68,24 @@ public static class AppConfiguration
         {
             options.Messaging.Hub = hub;
         }
+
+        var negotiateUrl = Environment.GetEnvironmentVariable("SQUADSCOUT_MESSAGING__NEGOTIATEURL");
+        if (!string.IsNullOrWhiteSpace(negotiateUrl))
+        {
+            options.Messaging.NegotiateUrl = negotiateUrl;
+        }
+
+        var connectTimeout = Environment.GetEnvironmentVariable("SQUADSCOUT_MESSAGING__CONNECTTIMEOUTSECONDS");
+        if (int.TryParse(connectTimeout, out var connectTimeoutSeconds) && connectTimeoutSeconds > 0)
+        {
+            options.Messaging.ConnectTimeoutSeconds = connectTimeoutSeconds;
+        }
+
+        var ackTimeout = Environment.GetEnvironmentVariable("SQUADSCOUT_MESSAGING__COMMANDACKTIMEOUTSECONDS");
+        if (int.TryParse(ackTimeout, out var commandAckTimeoutSeconds) && commandAckTimeoutSeconds > 0)
+        {
+            options.Messaging.CommandAckTimeoutSeconds = commandAckTimeoutSeconds;
+        }
     }
 }
 
@@ -121,7 +139,15 @@ public sealed class MessagingOptions
 
     public string Hub { get; set; } = "squadscout";
 
+    public string NegotiateUrl { get; set; } = "http://127.0.0.1:7071/api/negotiate";
+
     public bool AutoPrepareOnSessionStart { get; set; } = true;
+
+    public int ConnectTimeoutSeconds { get; set; } = 15;
+
+    public int CommandAckTimeoutSeconds { get; set; } = 10;
+
+    public int RecentTrafficCapacity { get; set; } = 200;
 }
 
 public sealed class LocalDevelopmentOptions

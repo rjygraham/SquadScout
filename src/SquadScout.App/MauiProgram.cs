@@ -33,6 +33,10 @@ public static class MauiProgram
 		builder.Services.AddSingleton(authOptions);
 		builder.Services.AddSingleton(messagingOptions);
 		builder.Services.AddSingleton(localDevelopmentOptions);
+		builder.Services.AddSingleton(_ => new HttpClient
+		{
+			Timeout = TimeSpan.FromSeconds(Math.Max(1, messagingOptions.ConnectTimeoutSeconds))
+		});
 		builder.Services.AddHttpClient("BrokerApi", client =>
 		{
 			client.BaseAddress = AppConfiguration.CreateBrokerBaseUri(brokerApiOptions);
@@ -42,6 +46,8 @@ public static class MauiProgram
 			static services => () => services.GetRequiredService<IHttpClientFactory>().CreateClient("BrokerApi"));
 		builder.Services.AddSingleton<IAppNavigator, ShellNavigator>();
 		builder.Services.AddSingleton<IAuthenticationService, ConfiguredAuthenticationService>();
+		builder.Services.AddSingleton<IPubSubNegotiationClient, PubSubNegotiationClient>();
+		builder.Services.AddSingleton<IWebPubSubSocketFactory, ClientWebPubSubSocketFactory>();
 		builder.Services.AddSingleton<IMessageConnectionService, MessagingConnectionService>();
 		builder.Services.AddSingleton<IProjectCatalogService, BrokerProjectCatalogService>();
 		builder.Services.AddSingleton<ISessionLifecycleService, BrokerSessionLifecycleService>();

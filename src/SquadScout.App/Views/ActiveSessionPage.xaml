@@ -93,6 +93,9 @@
                         Text="Source and navigation" />
                     <Label Text="{Binding SourceSummary}" />
                     <Button
+                        Command="{Binding ReconnectLiveTransportCommand}"
+                        Text="Retry live transport" />
+                    <Button
                         Command="{Binding RefreshStatusCommand}"
                         Text="Refresh broker state" />
                     <Button

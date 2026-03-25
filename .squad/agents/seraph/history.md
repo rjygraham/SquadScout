@@ -107,3 +107,11 @@
 - **Watch scope (on approval):** Verify mergeable state, execute merge, validate post-merge integration
 - **Escalation:** Cancel standby if Switch issues REJECTED or BLOCKED verdict
 - **Orchestration logs:** 2026-03-25T01-22-48Z-seraph.md
+
+### Issue #11 — PubSub Client Connection Service (2026-03-25)
+
+- **Worktree baseline sync:** Rebasing `squad/11-pubsub-client-connection-service` onto `origin/main` was necessary before implementation so the branch inherited merged negotiate hardening (#7/#12), MAUI shell work (#9), and Aspire defaults (#46/#47) instead of the older scaffold-only snapshot.
+- **Client transport shape shipped:** `src\SquadScout.App\Services\MessagingConnectionService.cs` now owns negotiate/connect/disconnect/reconnect-attempt flows against Azure Web PubSub using the `json.webpubsub.azure.v1` subprotocol, tracks session-scoped outbound/inbound envelopes, and preserves the negotiated `SessionGroup` contract for later routing work.
+- **Local dev bridge:** `src\SquadScout.App\Services\PubSubNegotiationClient.cs` sends localhost development identity headers only when the configured negotiate endpoint is loopback and auth mode is `LocalDevelopment`, so local end-to-end work stays practical without weakening the trusted Easy Auth boundary in cloud mode.
+- **UX surface:** `src\SquadScout.App\ViewModels\ActiveSessionViewModel.cs` and `Views\ActiveSessionPage.xaml` now surface live transport state changes continuously and expose an explicit "Retry live transport" flow when the socket faults.
+- **Validation:** In `D:\GitHub\SquadScout-11`, `dotnet build .\SquadScout.slnx -nologo`, `dotnet test .\tests\SquadScout.App.Tests\SquadScout.App.Tests.csproj -nologo`, and `dotnet test .\SquadScout.slnx -nologo --no-build` all passed (72/72 full-suite after the new app transport coverage landed).
