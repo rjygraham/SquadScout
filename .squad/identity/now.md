@@ -1,10 +1,10 @@
 # Current Focus
 
-The squad has just been hired for this repository.
+The squad is driving the remaining Phase 1 gate work for this repository.
 
 Immediate focus:
 
-- Design the local .NET broker and Copilot PTY wrapper architecture.
-- Define the MAUI-to-broker session lifecycle.
-- Decide whether Orleans should be used for durable state and replay support.
+- Issue #17: add the minimal telemetry and replay diagnostics needed to reconstruct Phase 1 ordering failures.
+- Preserve stable correlation identifiers and secret-safe export output while keeping the solution lightweight.
+- Finish and validate the last Phase 1 backlog item so Phase 2 can start from a debuggable baseline.
 

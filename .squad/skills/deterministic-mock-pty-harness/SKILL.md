@@ -18,6 +18,7 @@ Use this skill when a broker needs to prove PTY-driven input/output, lifecycle, 
 - **Keep mock controls mock-specific:** Deterministic scheduling helpers, queued failures, and captured writes should live on the mock implementation, not on the shared PTY interface.
 - **Capture relay publication separately:** Pair the PTY mock with a recording relay publisher and a small test fixture that pumps events through the broker orchestration layer. This lets one test assert chunk boundaries, relay order, replay windows, and visible session state.
 - **Model lifecycle with typed payloads:** Use explicit `SessionLifecyclePayload` and `OutputChunkPayload` types so later relay work does not depend on anonymous payloads or `JsonElement` guesses.
+- **Add an HTTP gate harness when contracts matter:** For true Phase 1 gate coverage, host the broker in-process (for example with `WebApplicationFactory<Program>`) and swap in a seeded project catalog, `MockPtyHost`, and `RecordingRelayPublisher`. This catches serializer/config drift at the HTTP boundary while still keeping PTY behavior deterministic.
 
 ## Examples
 
@@ -26,6 +27,7 @@ Use this skill when a broker needs to prove PTY-driven input/output, lifecycle, 
 - `src\SquadScout.Broker\Pty\MockPtySession.cs`
 - `tests\SquadScout.Broker.Tests\TestDoubles\MockPtyHarnessFixture.cs`
 - `tests\SquadScout.Broker.Tests\MockPtyHarnessIntegrationTests.cs`
+- `tests\SquadScout.Broker.Tests\BrokerPhase1DatapathGateTests.cs`
 
 ## Anti-Patterns
 

@@ -267,3 +267,13 @@
 
 **Outcome:** Issue #12 closed. Phase 1 security baseline (token validation + claims hardening) unblocks Phase 2 state machine. WS-2 token validation complete. No downstream rework needed. History and merge decision documented in `.squad/decisions/inbox/morpheus-pr45-merge.md`.
 
+
+### Issue #16 Phase 1 Datapath Gate — Security & Replay Risk Review (2026-03-25)
+
+- **Full-path review completed** across all 14 input artifacts: broker sequencing, replay buffer, orchestrator, relay, upstream auth, and MAUI client connection service.
+- **7 hardening tests implemented and committed** covering: ack idempotency on duplicates, ack freeze during gaps, direction trust boundary, sequence ownership enforcement, future-generation replay rejection, client gap detection status, and client generation reset.
+- **3 blocking risks identified for Phase 2 gate:** (1) Client never initiates replay after gap/reconnect — detected gap is surfaced but never recovered; (2) Gap-detected client input is silently dropped by broker with no signal; (3) Token refresh timestamp is stored but never triggers proactive re-negotiation.
+- **Key architectural finding:** `GapDetected` status is NOT in the `IsAccepted` set on `SequenceValidationResult`, so gap-detected client messages bypass the `onAcceptedAsync` callback entirely. Input is silently discarded. This is a design decision that must be resolved before Phase 2.
+- **Client generation reset accepts backward movement.** `ProcessGroupMessageAsync` resets to ANY different generation, including lower values. Stale transport messages could regress client state. Non-blocking for Phase 1 but must be fixed in Phase 2.
+- **Test baseline moved from 100 to 114** (28 App + 86 Broker). Decision note in `.squad/decisions/inbox/morpheus-issue-16-risks.md`.
+- **Key file paths:** `src\SquadScout.App\Services\MessagingConnectionService.cs` (client replay gap at line ~503), `src\SquadScout.Broker\Sessions\SequenceValidationResult.cs` (IsAccepted predicate), `src\SquadScout.Broker\Sessions\InMemorySessionOrchestrator.cs` (AcceptClientMessageAsync gap-drop at line ~107).

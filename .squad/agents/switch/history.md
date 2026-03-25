@@ -15,6 +15,10 @@
 - **Testing:** `PubSubUpstreamHandlerTests` uses a `DelegateHttpMessageHandler` to mock `HttpClient` responses, allowing full integration-style testing of the handler logic without a real broker.
 - **MAUI app test harness:** `tests\SquadScout.App.Tests\SquadScout.App.Tests.csproj` links selected `src\SquadScout.App` source files directly, so new view-model tests can exercise production logic without referencing the MAUI app project.
 - **MAUI seam pattern:** Lightweight test doubles for `IAppNavigator` plus a local `MainThread` shim are enough to unit-test `ProjectSelectionViewModel` and `ActiveSessionViewModel` in `tests\SquadScout.App.Tests\ProjectSelectionViewModelTests.cs` and `tests\SquadScout.App.Tests\ActiveSessionViewModelTests.cs`.
+- **Issue #16 gate spine:** The Phase 1 datapath gate is best anchored in six artifacts: `tests\SquadScout.App.Tests\PubSubConnectionServiceTests.cs`, `tests\SquadScout.App.Tests\SessionTranscriptControllerTests.cs`, `tests\SquadScout.Broker.Tests\PubSubNegotiateEndpointTests.cs`, `tests\SquadScout.Broker.Tests\PubSubUpstreamHandlerTests.cs`, `tests\SquadScout.Broker.Tests\SessionRelayPipelineTests.cs`, and `tests\SquadScout.Broker.Tests\MockPtyHarnessIntegrationTests.cs`.
+- **Shortest repeatable gate path:** For local confidence, run focused app transport tests, focused broker datapath tests, then `dotnet test .\SquadScout.slnx -nologo` as the final regression pass.
+- **Client transport test pattern:** In `tests\SquadScout.App.Tests\PubSubConnectionServiceTests.cs`, the safest way to prove receive-loop state is to inject broker frames through `FakeWebPubSubSocket`, then inspect the next outbound client envelope to confirm generation and cumulative ack behavior after gaps or generation resets.
+- **Gate posture:** Switch should not approve the Phase 1 datapath without explicit failure-mode coverage on the MAUI receive path and concrete diagnostics handoffs for broker/function/client boundaries.
 
 
 ### Workstream Decomposition (2026-03-24)
@@ -91,6 +95,38 @@
 **Patterns to preserve:** Single-source-of-truth acknowledgement (top-level only), heartbeat liveness-only separation. These resolved correctly and should not regress.
 
 **Impact:** Blocks Phase 2 grain activation and replay buffer. Message envelope is critical path; decision gate remains locked until both blockers resolved.
+
+### Issue #17 Landing Review — APPROVED (2026-03-25)
+
+**Scope:** Issue #17 (Phase 1 Session Telemetry & Replay Diagnostics)
+
+**Product Changes:**
+- `SessionTelemetryBuffer.cs`, `SessionTelemetrySnapshot.cs` — circular buffer for recent envelopes/events with secret-safe export
+- Broker orchestration telemetry export API (`GET /api/sessions/{sessionId}/telemetry`)
+- `SecretRedactor` enhanced with pattern-based JSON redaction for structured payload previews
+- App-side recent envelope tracking for client diagnostics
+- Gap detection validation status returns 200 OK (accepted with warning) instead of 409 Conflict
+
+**Test Coverage:**
+- `BrokerPhase1DatapathGateTests` — 3 scenarios covering full input → PTY → replay → telemetry round-trip
+- `SessionTelemetrySnapshotTests` — 2 scenarios for export structure and secret redaction
+- Hardening tests from prior commit (7 focused tests: ack idempotency, trust boundaries, generation resets)
+
+**Validation Gates:**
+- ✅ Clean build (`dotnet build .\SquadScout.slnx -nologo`)
+- ✅ All tests pass (126/126 app + broker)
+- ✅ Secret-safe export validated in dedicated tests
+- ✅ Phase 1 datapath gate covers input → PTY → replay → telemetry
+
+**Failure-Mode Coverage:**
+- Replay window capture (AvailableFromSequence, AvailableToSequence)
+- Generation reset events with reason field
+- Sequence gap detection in recent event buffer
+- All payload previews redacted for secret patterns (passwords, tokens, JWTs, Authorization headers)
+
+**Verdict:** ✅ **APPROVED** — Single coherent landing. Issue #17 acceptance criteria met with full test coverage. Ready for commit + PR + merge.
+
+**Next:** Neo stages commit excluding `.squad/` bookkeeping, opens PR against main with Issue #17 closure reference, pushes to origin.
 
 ### Issue #3 Acceptance Bar (2026-03-25)
 
@@ -195,6 +231,14 @@
 - **Design confidence:** Shell nav/state seams are wired. Auth, messaging, project, session lifecycle composition points registered. Dev config supports reviewable offline path.
 - **Verdict:** **APPROVED** — Ready for immediate merge.
 - **Handoff:** Orchestration logs written. Decisions merged. Trinity picks up merge-watch for CI/post-merge validation and regression monitoring.
+
+### Issue #16 WS-B1 Replay Recovery (2026-03-25)
+
+- **Replay request trigger rule:** In `MessagingConnectionService`, broker sequence gaps and reconnect completion must both emit a `ReplayRequest` envelope immediately; otherwise the replay contract exists but the client never exercises it.
+- **Receive-loop deadlock warning:** Replay requests triggered from inside the socket receive loop cannot synchronously await Web PubSub command acks. The ack arrives on the same receive loop, so replay dispatch from gap detection must be queued asynchronously or it deadlocks the transport.
+- **Gap closure rule:** A single `_gapDetected` flag is not enough to prove recovery. The client also needs the highest observed broker sequence for the current generation so replayed messages can clear the warning only when cumulative ack catches back up to the observed high-water mark.
+- **Durable user warning path:** A `ReplayResponse` with `GapDetected=true` is best surfaced through `MessageConnectionStatus` as a faulted continuity warning, because the existing transcript UX already renders faulted transport state durably without requiring a separate UI seam.
+- **Validation note:** Replay-focused app tests pass with `dotnet test .\tests\SquadScout.App.Tests -nologo --no-build --filter "ReceiveLoopTracksGenerationGapAndUsesRecoveredBrokerAckForLaterInput|ReconnectAsyncReNegotiatesAfterUnexpectedDisconnect|ReceivingBrokerMessagesWithSequenceGapSetsGapDetectedStatus|ReceivingNewGenerationResetsClientAcknowledgementState|ReplayResponseGapDetectedSurfacesDurableWarning|SendInputAsyncPublishesClientEnvelopeWithLatestAcknowledgedSequence|PrepareForSessionAsyncNegotiatesAndConnectsToSessionGroup|PrepareForSessionAsyncReturnsFaultedStatusWhenNegotiateFails|PubSubNegotiationClientAddsDevelopmentHeadersForLoopbackNegotiation"`; unrelated Trinity-owned token-refresh tests in the same file still fail in the wider app filter.
 - **Status:** Phase 1 Wave 1 Issue #9 complete. Advance team to next workstream (PR merge and Phase 2 Orleans integration setup).
 
 ### Aspire / ServiceDefaults Review Gate — REJECTED (2026-03-25T00:05:25Z)
@@ -380,4 +424,13 @@
 **Verification:** Full solution build ✅ | Full test suite (no-build) ✅ | Acceptance bar met at ViewModel seam ✅
 
 **Status:** ✅ **COMPLETE** — Ready for WS-2 phase (session datapath integration with Link/Morpheus).
+
+### Issue #17 Acceptance — Phase 1 Diagnostics Bar (2026-03-26)
+
+- **Minimum bar locked:** Phase 1 diagnostics are only acceptable if the broker exports ordering context (`generation`, expected vs. received client sequence, last accepted client sequence, replay window/gap metadata) and the app keeps a bounded local replay/ordering trace that can be inspected offline.
+- **Actual seam adopted:** `MessagingConnectionService.RecentTraffic` is now the local-analysis-friendly hook. It must retain replay-request / replay-response envelopes, stay capped by `RecentTrafficCapacity`, and redact payload strings / sensitive JSON members before they are stored for inspection.
+- **Correlation rule:** Replay diagnostics must preserve `CorrelationId` across the request/response pair and set `CausationId` back to the replay request `MessageId`; without that chain, ordering failures are much harder to reconstruct after the fact.
+- **Focused coverage added:** `BrokerPhase1DatapathGateTests` now proves the HTTP validation export carries generation + gap context, `InMemorySessionOrchestratorReplayTests` proves replay responses keep correlation/causation plus available-window metadata, and `PubSubConnectionServiceTests` proves the app traffic hook captures replay diagnostics, redacts secrets, and stays bounded.
+- **Determinism note:** The token-refresh transport test was flaky because it released the controlled delay before the refresh loop had actually scheduled it. Waiting for `RequestedDelays.Count == 1` before release keeps the full app suite stable.
+- **Validation:** Focused broker/app diagnostics runs passed, then `dotnet test .\SquadScout.slnx --no-restore --verbosity minimal` passed cleanly (122/122).
 

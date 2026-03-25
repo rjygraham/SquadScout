@@ -170,3 +170,27 @@
 - **Local orchestration wiring completed:** `src\SquadScout.Functions\Configuration\FunctionsHostOptions.cs`, `Program.cs`, `local.settings.sample.json`, and `src\SquadScout.AppHost\AppHost.cs` now carry an explicit broker base URL into the Functions host so local Aspire runs and standalone local settings both know how to reach the broker ingress endpoint.
 - **Regression proof points:** `tests\SquadScout.Broker.Tests\PubSubUpstreamHandlerTests.cs` now covers successful forward, malformed envelopes, webhook validation, and broker conflict propagation; `tests\SquadScout.App.Tests\PubSubConnectionServiceTests.cs` now locks the app-side `event` command shape.
 
+### Issue #16 Broker/PTy Gate Hardening (2026-03-25)
+
+- **HTTP contract seam closed:** `src\SquadScout.Broker\Program.cs` now applies `src\SquadScout.Contracts\Messages\SessionMessageSerializer.cs` to ASP.NET Core HTTP JSON options so broker endpoints accept the same camelCase + string-enum envelope shape already used by Functions, MAUI, and relay serialization.
+- **Repeatable gate proof added:** `tests\SquadScout.Broker.Tests\BrokerPhase1DatapathGateTests.cs` uses `WebApplicationFactory<Program>` with a seeded `InMemoryProjectCatalog`, `MockPtyHost`, and `RecordingRelayPublisher` to drive real HTTP session start/input through PTY writes, sequenced broker publication, and replay verification.
+- **Phase 1 broker assumption made explicit:** The broker-side path is ready for a repeatable gate as long as upstream callers send `MessageEnvelope<InputChunkPayload>` using the shared serializer contract; the remaining cross-team work stays on MAUI/Functions ingress coordination rather than PTY/replay correctness.
+- **Validation:** `dotnet test .\tests\SquadScout.Broker.Tests\SquadScout.Broker.Tests.csproj -nologo --no-build`, `dotnet build .\SquadScout.slnx -nologo`, and `dotnet test .\SquadScout.slnx -nologo --no-build` all pass after the broker JSON-alignment fix and new gate tests landed.
+
+### Issue #16 WS-B2 — Advisory Client Gap Policy (2026-03-25)
+
+- **Policy change landed:** Broker-side `GapDetected` client envelopes are now treated as advisory for Phase 1 ingress. The broker still returns structured gap diagnostics, but it no longer drops the user input or returns `409 Conflict` when the PTY write is accepted.
+- **Ack safety preserved:** `src\SquadScout.Broker\Sessions\SessionSequenceValidator.cs` and the session runtime state still freeze cumulative acknowledgement on gap-detected envelopes, so the broker never advances ack past missing client frames.
+- **Observable behavior improved:** `src\SquadScout.Broker\Sessions\InMemorySessionOrchestrator.cs` now logs an explicit structured warning when a gap-detected input is forwarded: session id plus expected/received client sequence values.
+- **Proof path updated:** `tests\SquadScout.Broker.Tests\SessionSequenceValidatorTests.cs`, `SessionRelayPipelineTests.cs`, and `BrokerPhase1DatapathGateTests.cs` now prove acceptance semantics, PTY forwarding, and HTTP 200 behavior for advisory gap handling.
+- **Validation:** Focused broker tests passed, followed by `dotnet test .\SquadScout.slnx -nologo --no-build` with **115/115 passing**.
+
+### Issue #17 Phase 1 Session Telemetry & Replay Diagnostics (2026-03-25)
+
+- **Authoritative export lives in broker runtime:** `src\SquadScout.Broker\Sessions\SessionRuntimeState.cs` now keeps bounded, secret-safe telemetry buffers for recent envelopes and replay/validation events, then exports them as `SessionTelemetrySnapshot` via `ISessionOrchestrator.ExportTelemetryAsync(...)`.
+- **Sequence-centric continuity context added:** Each export carries the active sequencing snapshot, replay-buffer window metadata, redacted payload previews, stable `messageId` / `correlationId` / `causationId` values, replay gap details, and generation-reset events so Phase 1 ordering failures can be reconstructed without ad hoc console logs.
+- **Lightweight local hook exposed:** `src\SquadScout.Broker\Program.cs` now serves `GET /api/sessions/{sessionId}/telemetry`, which returns the runtime-authored diagnostics snapshot for local failure analysis without introducing a second telemetry model or app-only state dependency.
+- **Secret-safety tightened for diagnostics:** `src\SquadScout.Contracts\Security\SecretRedactor.cs` now redacts quoted JSON key/value pairs and `JsonElement` payloads, which keeps exported telemetry safe even when PTY output or client input contains embedded JSON secrets.
+- **Proof path:** `tests\SquadScout.Broker.Tests\SessionTelemetrySnapshotTests.cs`, `BrokerPhase1DatapathGateTests.cs`, and `SecurityBaselineTests.cs` now cover replay-gap export context, generation-reset telemetry, HTTP export behavior, and secret redaction.
+- **Validation:** Focused broker diagnostics tests passed (40/40), followed by `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` passing for the full solution.
+

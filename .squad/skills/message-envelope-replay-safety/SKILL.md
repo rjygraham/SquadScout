@@ -22,6 +22,7 @@ Use this skill when a broker and client exchange realtime session traffic over a
 - **Review both generation mismatch directions:** Keep stale-generation and future-generation validation as separate failure modes, and test that neither path mutates the broker's cumulative acknowledgement state.
 - **Sequence beats timestamp:** Timestamps are for diagnostics, leases, and correlation. Ordering, dedupe, and replay should use sequence plus stable message identifiers.
 - **Version the envelope early:** Add contract versioning before multiple components ship against the first draft.
+- **Probe client receive state through the next outbound envelope:** In transport tests, feed broker-authored frames into the client receive loop, then assert that the next client-authored envelope echoes the expected `generation` and cumulative acknowledgement. This proves reset and gap handling without exposing private transport fields.
 
 ## Examples
 
@@ -29,6 +30,7 @@ Use this skill when a broker and client exchange realtime session traffic over a
 - Replay response: `{ generation, availableFromSequence, availableToSequence, gapDetected, messages: [...] }`
 - Reset-boundary replay response: `{ generation: 5, availableFromSequence: 1, availableToSequence: 17, gapDetected: true, messages: [] }`
 - Heartbeat / ack control frame: `{ sessionId, ackUpToSequence, issuedAtUtc, expiresAtUtc, correlationId }`
+- Client transport probe: receive broker frames `(generation=1, sequence=1)` then `(generation=2, sequence=1)`, send input, and assert the outbound client envelope echoes `generation=2` and `ackUpToSequence=1`.
 
 ## Anti-Patterns
 
@@ -38,3 +40,4 @@ Use this skill when a broker and client exchange realtime session traffic over a
 - Do not allow overflow/gap behavior to be implied; surface it in the contract.
 - Do not reuse a session identity after ordered state resets unless the contract also carries generation metadata.
 - Do not replay new-generation messages in response to an old-generation cursor; force the client to recognize the reset boundary first.
+- Do not test client reconnect/gap state only through private fields when the public envelope contract already exposes the same ordered-state evidence.

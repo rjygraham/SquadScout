@@ -85,3 +85,17 @@
 - **Files:** ShellNavigator.cs, ActiveSessionViewModel.cs, ProjectSelectionViewModel.cs, ActiveSessionPage.xaml, ProjectSelectionPage.xaml, history.md, skills.
 - **Status:** ✅ COMPLETE — Ready for WS-2 phase (session datapath integration).
 
+### 2026-03-25 — Issue #16 Mobile Audit First Slice
+
+- **Client-path audit:** Verified the MAUI negotiate → connect → session-start → transcript path across `src\SquadScout.App\Services\MessagingConnectionService.cs`, `PubSubNegotiationClient.cs`, `WebPubSubSocketClient.cs`, `BrokerBackedMobileServices.cs`, `src\SquadScout.App\ViewModels\ProjectSelectionViewModel.cs`, `ActiveSessionViewModel.cs`, and `SessionTranscriptController.cs`.
+- **Mobile seam fixed:** Tightened transcript composer gating so broker-backed/live sessions only allow sends when the session is actually `Running` and the live transport is `Connected`; preview mode still allows local drafting when `SupportsLiveSessionStream` is false.
+- **Testability pattern:** Kept the fix at the pure controller/view-model seam with focused coverage in `tests\SquadScout.App.Tests\SessionTranscriptControllerTests.cs` and `ActiveSessionViewModelTests.cs`, avoiding new MAUI/XAML dependencies while proving transport-state UX.
+
+### 2026-03-25 — Issue #16 WS-B3 Proactive Token Refresh
+
+- **Refresh lifecycle:** `MessagingConnectionService` now schedules a proactive token refresh before `RefreshAtUtc`, using the earlier of `RefreshAtUtc - 5 minutes` and 75% of the remaining token window, then silently re-negotiates and reconnects the live PubSub transport.
+- **Mobile UX stance:** Successful refresh avoids a visible reconnect-state bounce; the transport stays in the connected UX lane unless refresh actually fails.
+- **Failure contract:** Refresh failures now fault the transport with explicit retry guidance so the transcript banner tells the user what to do instead of silently aging into an expired socket.
+- **Implementation caution learned:** The refresh timer's cancellation token cannot also drive the reconnect call, because the reconnect cleanup cancels that timer. The reconnect path must use its own uncoupled operation token or it self-cancels before the refreshed socket comes up.
+- **Validation:** `dotnet test tests\SquadScout.App.Tests\SquadScout.App.Tests.csproj --no-restore --filter "FullyQualifiedName~PubSubConnectionServiceTests|FullyQualifiedName~ActiveSessionViewModelTests"` passed, then `dotnet test tests\SquadScout.App.Tests\SquadScout.App.Tests.csproj --no-restore` and `dotnet test .\SquadScout.slnx -nologo --no-restore` passed.
+
