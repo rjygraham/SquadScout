@@ -8,6 +8,8 @@ public interface ISessionRelay
 {
     Task<SessionDescriptor> StartAsync(StartSessionCommand command, CancellationToken cancellationToken = default);
 
+    Task<SessionDescriptor> StopAsync(string sessionId, StopSessionCommand command, CancellationToken cancellationToken = default);
+
     Task<SequenceValidationResult> RelayInputAsync(
         string sessionId,
         MessageEnvelope<InputChunkPayload> envelope,

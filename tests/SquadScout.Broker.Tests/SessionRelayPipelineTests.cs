@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using SquadScout.Broker.Projects;
 using SquadScout.Broker.Pty;
@@ -137,6 +138,115 @@ public sealed class SessionRelayPipelineTests
     }
 
     [Fact]
+    public async Task StopAsyncTerminatesActivePtyAndReturnsStoppedDescriptor()
+    {
+        var harness = await CreateHarnessAsync();
+        await using var relay = harness.CreateRelay();
+
+        var session = await relay.StartAsync(new StartSessionCommand
+        {
+            ProjectId = "broker",
+            RequestedBy = "tests"
+        });
+
+        var stopped = await relay.StopAsync(session.SessionId, new StopSessionCommand
+        {
+            ProjectId = session.ProjectId,
+            RequestedBy = "tests",
+            Reason = "user-requested-stop"
+        });
+
+        Assert.Equal(SessionState.Stopped, stopped.State);
+
+        var published = await harness.RelayPublisher.WaitForEnvelopeCountAsync(2);
+        Assert.Collection(
+            published.Take(2),
+            message =>
+            {
+                Assert.Equal(SessionMessageType.SessionLifecycle, message.MessageType);
+                var payload = MockPtyHarnessFixture.DeserializePayload<SessionLifecyclePayload>(message);
+                Assert.Equal(SessionState.Running, payload.State);
+                Assert.Equal("pty-started", payload.Reason);
+            },
+            message =>
+            {
+                Assert.Equal(SessionMessageType.SessionLifecycle, message.MessageType);
+                var payload = MockPtyHarnessFixture.DeserializePayload<SessionLifecyclePayload>(message);
+                Assert.Equal(SessionState.Stopped, payload.State);
+                Assert.Equal("pty-exited", payload.Reason);
+                Assert.Null(payload.ExitCode);
+            });
+
+        var descriptor = await harness.Orchestrator.GetAsync(session.SessionId);
+        Assert.NotNull(descriptor);
+        Assert.Equal(SessionState.Stopped, descriptor!.State);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => relay.RelayInputAsync(
+            session.SessionId,
+            CreateInputEnvelope(session, clientSequence: 1, "after-stop\n")));
+
+        Assert.Contains("active PTY", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StopAsyncRejectsProjectMismatchWithoutTerminatingSession()
+    {
+        var harness = await CreateHarnessAsync();
+        await using var relay = harness.CreateRelay();
+
+        var session = await relay.StartAsync(new StartSessionCommand
+        {
+            ProjectId = "broker",
+            RequestedBy = "tests"
+        });
+
+        var exception = await Assert.ThrowsAsync<SessionControlException>(() => relay.StopAsync(
+            session.SessionId,
+            new StopSessionCommand
+            {
+                ProjectId = "other-project",
+                RequestedBy = "tests"
+            }));
+
+        Assert.Equal("session_project_mismatch", exception.Code);
+        Assert.Equal(StatusCodes.Status409Conflict, exception.StatusCode);
+        Assert.Equal(session.SessionId, exception.SessionId);
+        Assert.Equal(session.ProjectId, exception.ProjectId);
+
+        var validation = await relay.RelayInputAsync(session.SessionId, CreateInputEnvelope(session, clientSequence: 1, "still-running\n"));
+        Assert.Equal(SequenceValidationStatus.Accepted, validation.Status);
+    }
+
+    [Fact]
+    public async Task StopAsyncRejectsSessionsThatAlreadyExited()
+    {
+        var harness = await CreateHarnessAsync();
+        await using var relay = harness.CreateRelay();
+
+        var session = await relay.StartAsync(new StartSessionCommand
+        {
+            ProjectId = "broker",
+            RequestedBy = "tests"
+        });
+
+        var ptySession = harness.PtyHost.GetRequiredSession(session.SessionId);
+        ptySession.EnqueueExit(0);
+        ptySession.ReleaseNext();
+        _ = await harness.RelayPublisher.WaitForEnvelopeCountAsync(2);
+
+        var exception = await Assert.ThrowsAsync<SessionControlException>(() => relay.StopAsync(
+            session.SessionId,
+            new StopSessionCommand
+            {
+                ProjectId = session.ProjectId,
+                RequestedBy = "tests"
+            }));
+
+        Assert.Equal("session_already_stopped", exception.Code);
+        Assert.Equal(StatusCodes.Status409Conflict, exception.StatusCode);
+    }
+
+    [Fact]
     public async Task StartAsyncMarksSessionStoppedWhenPtyStartupFails()
     {
         var harness = await CreateHarnessAsync();
@@ -163,6 +273,23 @@ public sealed class SessionRelayPipelineTests
         Assert.Equal(SessionState.Stopped, descriptor!.State);
     }
 
+    [Fact]
+    public async Task StartAsyncRejectsUnknownProjectsBeforeCreatingSessions()
+    {
+        var harness = await CreateHarnessWithoutProjectsAsync();
+        await using var relay = harness.CreateRelay();
+
+        var exception = await Assert.ThrowsAsync<SessionControlException>(() => relay.StartAsync(new StartSessionCommand
+        {
+            ProjectId = "missing",
+            RequestedBy = "tests"
+        }));
+
+        Assert.Equal("project_not_found", exception.Code);
+        Assert.Equal(StatusCodes.Status404NotFound, exception.StatusCode);
+        Assert.Empty(harness.RelayPublisher.StartedSessions);
+    }
+
     private static async Task<RelayHarness> CreateHarnessAsync()
     {
         var catalog = new InMemoryProjectCatalog();
@@ -177,6 +304,15 @@ public sealed class SessionRelayPipelineTests
         var orchestrator = new InMemorySessionOrchestrator(relayPublisher, new SessionSequenceValidator(), replayBufferCapacity: 8);
         var ptyHost = new MockPtyHost();
         return new RelayHarness(catalog, relayPublisher, orchestrator, ptyHost);
+    }
+
+    private static Task<RelayHarness> CreateHarnessWithoutProjectsAsync()
+    {
+        var catalog = new InMemoryProjectCatalog();
+        var relayPublisher = new RecordingRelayPublisher();
+        var orchestrator = new InMemorySessionOrchestrator(relayPublisher, new SessionSequenceValidator(), replayBufferCapacity: 8);
+        var ptyHost = new MockPtyHost();
+        return Task.FromResult(new RelayHarness(catalog, relayPublisher, orchestrator, ptyHost));
     }
 
     private static MessageEnvelope<InputChunkPayload> CreateInputEnvelope(
