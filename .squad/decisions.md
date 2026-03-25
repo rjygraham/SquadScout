@@ -117,6 +117,12 @@ dotnet test .\SquadScout.slnx -nologo --no-build
 
 **Remaining coverage needed:** duplicate-with-changed-ack, gap-with-ack, future-generation, project-id mismatch, invalid bounds, oversized batch, multi-page pagination.
 
+## Seraph — Issue #7 Negotiate Boundary (2026-03-25)
+
+- **Trusted identity boundary:** The Azure Function treats App Service / Easy Auth principal headers as the primary proof that Entra authentication already succeeded before the function executes.
+- **Local development path:** A localhost-only development identity fallback is allowed only when explicitly enabled in function configuration and the app is not running in Azure.
+- **Session group contract:** Phase 1 negotiate requests keep `brokerId` optional so single-broker deployments stay on the base `session:{projectId}:{sessionId}` group, while still reserving `:brokerId` for later broker-affinity work.
+
 ## Ordered Implementation Backlog — 2026-03-25
 
 **From Neo's backlog synthesis (2026-03-25)**

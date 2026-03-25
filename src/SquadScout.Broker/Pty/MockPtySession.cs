@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using SquadScout.Contracts.Security;
 using SquadScout.Contracts.Sessions;
 
 namespace SquadScout.Broker.Pty;
@@ -125,6 +126,7 @@ public sealed class MockPtySession : IPtySession
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(input);
+        var sanitizedInput = PtyInputSanitizer.Sanitize(input);
 
         lock (_syncRoot)
         {
@@ -135,7 +137,7 @@ public sealed class MockPtySession : IPtySession
                 throw new InvalidOperationException("Cannot write to a stopped PTY session.");
             }
 
-            _writtenInputs.Add(input);
+            _writtenInputs.Add(sanitizedInput);
         }
 
         return Task.CompletedTask;

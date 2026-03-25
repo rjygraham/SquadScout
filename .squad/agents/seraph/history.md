@@ -101,3 +101,9 @@
 - **Watch scope (on approval):** Verify mergeable state, execute merge, validate post-merge integration
 - **Escalation:** Cancel standby if Switch issues REJECTED or BLOCKED verdict
 - **Orchestration logs:** 2026-03-25T01-22-48Z-seraph.md
+### 2026-03-25: Aspire orchestration + ServiceDefaults groundwork
+
+- Aligned the repo's new Aspire AppHost and ServiceDefaults rollout with Seraph-owned startup concerns after the shared Aspire scaffolding landed on main.
+- Documented why the shared defaults project stays multi-targeted for net8.0 and net10.0 so the Azure Functions worker can opt into AddServiceDefaults() while the MAUI app can initialize OpenTelemetry via the MAUI-specific startup hook.
+- Preserved broker compatibility by surfacing the effective ASP.NET Core listen URL in the root status payload while still letting standalone runs honor Broker:ListenUrl.
+- Updated the MAUI app to create broker clients through an Aspire-configured HttpClient factory seam so resilience and future service discovery can flow into mobile-to-broker calls without breaking offline fallbacks.

@@ -2,6 +2,7 @@ using System.Text;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Pty.Net;
+using SquadScout.Contracts.Security;
 using SquadScout.Contracts.Sessions;
 
 namespace SquadScout.Broker.Pty;
@@ -12,6 +13,7 @@ public sealed class CopilotPtySession : IPtySession
     private readonly Channel<PtySessionEvent> _events = Channel.CreateUnbounded<PtySessionEvent>();
     private readonly CancellationTokenSource _lifecycleCancellation = new();
     private readonly ILogger<CopilotPtySession> _logger;
+    private readonly int _maxInputCharactersPerWrite;
     private readonly StreamReader _reader;
     private readonly TaskCompletionSource<ProcessExitObservation> _processExit = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Task _outputPump;
@@ -29,11 +31,13 @@ public sealed class CopilotPtySession : IPtySession
         PtySessionStartRequest request,
         IPtyConnection connection,
         int outputBufferSize,
+        int maxInputCharactersPerWrite,
         ILogger<CopilotPtySession> logger)
     {
         ArgumentNullException.ThrowIfNull(request);
         _connection = connection ?? throw new ArgumentNullException(nameof(connection));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _maxInputCharactersPerWrite = Math.Max(1, maxInputCharactersPerWrite);
 
         SessionId = request.SessionId;
         ProjectId = request.ProjectId;
@@ -73,7 +77,8 @@ public sealed class CopilotPtySession : IPtySession
             }
         }
 
-        var buffer = Encoding.UTF8.GetBytes(input);
+        var sanitizedInput = PtyInputSanitizer.Sanitize(input, _maxInputCharactersPerWrite);
+        var buffer = Encoding.UTF8.GetBytes(sanitizedInput);
         await _connection.WriterStream.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
         await _connection.WriterStream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }

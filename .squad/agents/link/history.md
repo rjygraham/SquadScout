@@ -125,4 +125,10 @@
 - **Merge status:** ✅ Successfully merged to main using squash strategy
 - **Rationale:** Single logical commit, clean history, minimizes downstream rebase conflicts
 - **Result:** Aspire + ServiceDefaults now integrated into main; unblocks Phase 2 grain activation and multi-project orchestration testing
+### Issue #6 Broker Relay Pipeline (2026-03-25)
+
+- **Phase 1 relay owner lives above the PTY seam:** `src\SquadScout.Broker\Relay\InMemorySessionRelay.cs` now owns the active PTY session registry, project-root resolution, PTY startup, background envelope pumping, and client-input dispatch so both `MockPtyHost` and `CopilotPtyHost` stay swappable behind `IPtyHost`.
+- **Input sequencing commit rule:** `src\SquadScout.Broker\Sessions\InMemorySessionOrchestrator.cs` now serializes client-envelope acceptance behind a per-session gate and only commits accepted client sequencing after the PTY write callback succeeds; duplicates stay idempotent and do not write twice.
+- **Broker surface now exercises the datapath:** `src\SquadScout.Broker\Program.cs` starts sessions through the relay service and adds `/api/sessions/{sessionId}/input`, while `tests\SquadScout.Broker.Tests\SessionRelayPipelineTests.cs` proves start → input write → output publication → replay using the mock PTY harness.
+- **Validation path:** `dotnet build .\SquadScout.slnx -nologo` and `dotnet test .\SquadScout.slnx -nologo --no-build` both pass after the relay pipeline landed.
 
