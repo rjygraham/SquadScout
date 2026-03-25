@@ -3,6 +3,7 @@
 ## 2026-03-25
 
 - Accepted: PR #46 (Aspire / ServiceDefaults Revision) — Real Aspire entrypoint with AppHost orchestration, ServiceDefaults multi-target (net8.0;net10.0), preserved broker /health, integrated logging/resilience across Functions, Broker, and MAUI. Approved by Switch; merge-watch active. GitHub checks absent; merge risk low based on local validation (build ✅, tests 55/55 ✅, AppHost smoke ✅, broker /health ✅).
+- Accepted: Issue #13 Revision — Stop-Failure Recovery Serialization. Keep existing stop/input shared gate design. Require stop-failure recovery to reacquire `StopInputGate` before clearing `_stopRequested`. Preserves post-accept stop/input serialization invariant on both success and failure paths. Deterministic regression test added: `StopAsyncFailureUnderTerminateThrowReopensInputAfterGateReacquisition`. Validated by Seraph (build ✅, focused tests ✅, full suite ✅, commit `27aa9e1`). Ready for final re-review by Switch.
 
 ## 2026-03-24
 

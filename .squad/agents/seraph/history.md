@@ -85,3 +85,9 @@
 - **No blocking dependencies:** Trinity's implementation uses existing shared Contracts; no new contract changes on issue #9 critical path.
 
 **Next:** Awaiting Switch approval. Once PR #43 merges, MAUI client tier can integrate with broker relay pipeline (issue #6, Link/Seraph parallel work).
+
+### Issue #13 / PR #44 Revision — Stop Failure Gate Hardening (2026-03-25)
+
+- **Failure-path invariant tightened:** `src\SquadScout.Broker\Relay\InMemorySessionRelay.cs` now reacquires `StopInputGate` before clearing `_stopRequested` after a `TerminateAsync()` failure, so stop-failure recovery stays serialized with input admission instead of reopening the accepted-stop race mid-recovery.
+- **Deterministic proof extended:** `tests\SquadScout.Broker.Tests\SessionRelayPipelineTests.cs` now covers both the successful stop overlap and a failing-stop overlap, using the gateable PTY harness plus the relay's shared stop gate to prove `session_stop_failed` stays blocked behind recovery before input can resume.
+- **Validation:** In `D:\GitHub\SquadScout-13`, `dotnet build .\SquadScout.slnx -nologo`, `dotnet test .\tests\SquadScout.Broker.Tests\SquadScout.Broker.Tests.csproj -nologo --filter "FullyQualifiedName~SessionRelayPipelineTests"`, and `dotnet test .\SquadScout.slnx -nologo --no-build` all passed (61/61 full-suite).
