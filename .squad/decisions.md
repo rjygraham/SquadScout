@@ -664,3 +664,35 @@ This keeps the revision cohesive and close to current Aspire ecosystem guidance 
 - No GitHub check runs are configured on PR #45 right now, so merge confidence is based on the local build/test evidence above.
 - Coverage is targeted and unit-focused; no live Azure Web PubSub integration probe exists yet, so first deployment should watch for environment-specific token issuance behavior.
 
+
+## Switch — Issue #12 Review Gate: Token Validation & Session Claims Hardening (2026-03-25T00:28:54Z)
+
+**Owner:** Switch  
+**Artifact:** Morpheus's Token Validation & Session Claims Hardening (issue #12)  
+**Verdict:** APPROVED  
+
+### Review Summary
+
+- **PR:** #45 (squad/12-token-validation-session-claims-hardening at commit 5e7f232)
+- **Validation:** Build green, focused tests 14/14 (PubSubNegotiateEndpointTests), full tests 61/61
+- **Security Review:** Passes closed Easy Auth handling, header tampering rejection, broker ID scoping, session isolation coherence, response hygiene
+
+### Key Findings
+
+1. **Easy Auth Isolation:** Fails closed outside Azure Functions host boundary; localhost dev path does not accept spoofed Easy Auth headers.
+2. **Header/Payload Tampering:** Trusted principal headers and decoded Easy Auth payload agreement verified; disagreement triggers rejection.
+3. **Broker ID Scoping:** Client negotiate requests cannot self-assert brokerId; only broker-scoped requests may carry segment.
+4. **Session Isolation:** PubSub userId scoped to participant + project + session + optional broker + principal, maintaining session:{projectId}:{sessionId}[:brokerId] group contract coherence.
+5. **Response Hygiene:** Public negotiate response no longer echoes principal details, roles, or auto-join groups; no checked-in downstream consumers depend on removed fields.
+
+### Merge-Risk Assessment
+
+**Risk Level:** LOW
+
+**Caveats:** GitHub check runs not configured (merge confidence based on local build/test evidence). Unit/local validation only; first deployment should monitor environment-specific token issuance behavior.
+
+### Decision
+
+**PR #45 APPROVED for merge.** Morpheus activated for merge-watch.
+
+**Status:** Ready for main branch merge.
