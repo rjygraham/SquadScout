@@ -15,13 +15,16 @@ public sealed class WebPubSubUpstreamHandler
     public const string CloudEventConnectionIdHeaderName = "ce-connectionId";
 
     private static readonly string InputCloudEventType = $"azure.webpubsub.user.{SessionUpstreamEventNames.Input}";
+    private readonly WebPubSubUpstreamAuthenticator _authenticator;
     private readonly BrokerInputForwarder _brokerInputForwarder;
     private readonly ILogger<WebPubSubUpstreamHandler> _logger;
 
     public WebPubSubUpstreamHandler(
+        WebPubSubUpstreamAuthenticator authenticator,
         BrokerInputForwarder brokerInputForwarder,
         ILogger<WebPubSubUpstreamHandler> logger)
     {
+        _authenticator = authenticator ?? throw new ArgumentNullException(nameof(authenticator));
         _brokerInputForwarder = brokerInputForwarder ?? throw new ArgumentNullException(nameof(brokerInputForwarder));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -41,6 +44,11 @@ public sealed class WebPubSubUpstreamHandler
         if (string.Equals(method, "OPTIONS", StringComparison.OrdinalIgnoreCase))
         {
             return new WebPubSubUpstreamResponse(HttpStatusCode.OK, allowedOrigin);
+        }
+
+        if (!_authenticator.TryAuthenticate(headers, out var authenticationFailure))
+        {
+            return Error(HttpStatusCode.Unauthorized, allowedOrigin, authenticationFailure);
         }
 
         var eventType = GetHeaderValue(headers, CloudEventTypeHeaderName);

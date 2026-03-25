@@ -58,6 +58,7 @@ builder.Services.AddHttpClient<BrokerInputForwarder>((serviceProvider, client) =
     var options = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<FunctionsHostOptions>>().Value;
     client.BaseAddress = new Uri(options.BrokerBaseUrl, UriKind.Absolute);
 });
+builder.Services.AddSingleton<WebPubSubUpstreamAuthenticator>();
 builder.Services.AddSingleton<WebPubSubUpstreamHandler>();
 
 builder.Build().Run();

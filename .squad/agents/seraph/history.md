@@ -1,5 +1,22 @@
 # Seraph History
 
+## Core Context (Summarized)
+
+**Domain:** Cloud/Auth for SquadScout (Azure Web PubSub relay + Function token broker + Entra auth)  
+**6 Workstreams:** (1) Entra auth flow, (2) Function integration, (3) PubSub routing, (4) token refresh/reconnect, (5) multi-broker affinity, (6) observability. WS-1/WS-2 unblock rest.
+
+**Key Technical Decisions:**
+- Token minting via Function managed identity (no connection strings in code)
+- Session groups: `session:{projectId}:{sessionId}[:brokerId]`
+- App-level reliability via Orleans (single-threaded turns, sequence numbers, replay buffer)
+- No distributed session cache Phase 1/2; broker is source of truth
+- Token TTL 1 hour; proactive refresh at 50-min mark
+- Web PubSub transport is best-effort; app handles recovery
+
+**Cross-Agent Dependencies:** Link (Entra), Trinity (MAUI shell), Morpheus (infra), Neo (grains), Switch (review)
+
+**User Constraints:** Single-user + multi-machine; offline-first local broker fallback; MAUI chat UI + text-to-speech.
+
 ## Day 1 Context
 
 - User: Ryan Graham
@@ -9,76 +26,19 @@
 
 ## Learnings
 
-### 2026-03-24: Cloud/Auth Domain Decomposition
-
-**Workstream Structure:**
-- Seraph owns 6 workstreams: (1) Entra auth flow, (2) Function integration, (3) PubSub routing, (4) token refresh/reconnect, (5) multi-broker affinity, (6) observability.
-- Each workstream is 1–3 weeks; most overlap; WS-1 and WS-2 unblock everything else.
-- MVP slice is single session, local broker, cloud token path: Entra → Function → PubSub, broker joins group, MAUI joins group, multicast proves E2E.
-
-**Key Constraints Locked:**
-- Token minting via Function managed identity (no connection strings in code).
-- Session groups named `session:{projectId}:{sessionId}[:brokerId]` (enforced in Function).
-- No distributed session cache Phase 1/2; broker is source of truth for session state.
-- Token TTL 1 hour; refresh proactive at 50-min mark.
-- App-level reliability (sequence numbers, replay buffer in grain) — Web PubSub transport is best-effort.
-
-**Dependencies Identified:**
-- **Tight:** Link must deliver Entra token; Trinity must call `/negotiate`; Morpheus must provision infrastructure.
-- **Loose:** Switch can mock Function offline; Neo's grain lifecycle aligns with group lifecycle.
-
-**Rollout Risk:**
-- Phase 1 → Phase 2: Orleans grain lifecycle must not break PubSub group consistency (grain activation ↔ group join, deactivation ↔ group leave).
-
-
-### User Directives Accepted (2026-03-24)
-
-- **Single-user + multi-machine design confirmed.** Design local broker scaffolding to support multiple developers with separate Azure credentials; no shared multi-user backend until post-MVP.
-- **App-level sequencing/replay via Orleans confirmed** as source of truth, not Web PubSub features. Service-tier reliability features not required; Orleans grain single-threaded execution enforces atomicity.
-- **Status:** All 6 Seraph workstreams aligned to Neo's unified decomposition. WS-3 (PubSub routing) and WS-4 (token refresh/reconnect) priority path locked. Ready for Phase 1 execution.
+### 2026-03-24: Cloud/Auth Domain Decomposition (Archived in Core Context)
 
 ### 2026-03-25: Merge Watcher — PR #41 & #42 Monitoring
 
-**Task:** Explicitly watch PR #41 and #42, merge only when clean.
+**Status:** PRs #41 & #42 both merged to main. WS-2 (Function integration) complete, WS-3 (PubSub routing) unblocked.
 
-**PR #42 Status:**
-- Title: Implement issue #8 safety baseline
-- State: **MERGED** (2026-03-24T22:28:52Z, beat #41 by ~2 minutes)
-- Merge commit: User (`rjygraham`)
-- Issue #8: Closed
-- Checks: heartbeat SUCCESS ✓
-
-**PR #41 Status (Seraph action):**
-- Title: Implement Azure Function negotiate endpoint
-- State: **OPEN** → **MERGED** (2026-03-24T18:30:09Z)
-- Merge strategy: Create commit merge (single logical commit preserved)
-- Pre-merge checklist:
-  - Merge state: CLEAN ✓
-  - Reviews: 0 (none blocking) ✓
-  - Checks: 0 (no failures) ✓
-  - Comments: 0 (no discussion) ✓
-  - Conflicts: None ✓
-- Key artifact: `src/SquadScout.Cloud/NegotiateFunction.cs` — Azure Function trusted boundary (Easy Auth, managed-identity token minting, session groups, localhost fallback)
-- Issue #7: Auto-closed by PR body
-
-**Outcome:**
-- Both PRs now merged to main
-- WS-2 (Function integration) trusted boundary tier complete
-- WS-3 (PubSub routing) unblocked
-- Merge conflict minimized via early merge before dependent work accumulates
+- **PR #42:** Issue #8 safety baseline (merged 2026-03-24T22:28:52Z)
+- **PR #41:** Azure Function negotiate endpoint (merged 2026-03-24T18:30:09Z), key artifact `NegotiateFunction.cs` (Easy Auth boundary, managed-identity token minting)
+- **Issue #7:** Auto-closed by PR #41 body
 
 ### Issue #9 Handoff — Trinity Implementation Complete (2026-03-24T23:39:21Z)
 
-**Status:** MAUI App Shell Scaffolding complete; PR #43 in review (awaiting Switch gate)
-
-**Context:** Trinity completed issue #9 MAUI app shell scaffolding with cross-platform support and chat-like terminal UI. Build green, 36 tests pass. PR #43 opened; Switch begins formal review.
-
-**Impact on Seraph Workstreams:**
-- WS-3 (PubSub routing): Trinity's MAUI client integration now available to pair with Link's relay pipeline (issue #6).
-- WS-4 (token refresh/reconnect): MAUI session bindings ready to receive negotiated tokens from NegotiateFunction (PR #41 already merged).
-- **No blocking dependencies:** Trinity's implementation uses existing shared Contracts; no new contract changes on issue #9 critical path.
-
-**Next:** Awaiting Switch approval. Once PR #43 merges, MAUI client tier can integrate with broker relay pipeline (issue #6, Link/Seraph parallel work).
+MAUI App Shell complete (cross-platform, chat UI, 36 tests passing). PR #43 in review (Switch gate). Unblocks WS-3/WS-4 client pairing with broker relay and token refresh flows.
 
 ### Issue #13 / PR #44 Revision — Stop Failure Gate Hardening (2026-03-25)
 
@@ -107,50 +67,8 @@
 - Documented why the shared defaults project stays multi-targeted for net8.0 and net10.0 so the Azure Functions worker can opt into AddServiceDefaults() while the MAUI app can initialize OpenTelemetry via the MAUI-specific startup hook.
 - Preserved broker compatibility by surfacing the effective ASP.NET Core listen URL in the root status payload while still letting standalone runs honor Broker:ListenUrl.
 - Updated the MAUI app to create broker clients through an Aspire-configured HttpClient factory seam so resilience and future service discovery can flow into mobile-to-broker calls without breaking offline fallbacks.
-### 2026-03-25: Merge Watcher — PR #41 & #42 Monitoring
 
-**Task:** Explicitly watch PR #41 and #42, merge only when clean.
-
-**PR #42 Status:**
-- Title: Implement issue #8 safety baseline
-- State: **MERGED** (2026-03-24T22:28:52Z, beat #41 by ~2 minutes)
-- Merge commit: User (`rjygraham`)
-- Issue #8: Closed
-- Checks: heartbeat SUCCESS ✓
-
-**PR #41 Status (Seraph action):**
-- Title: Implement Azure Function negotiate endpoint
-- State: **OPEN** → **MERGED** (2026-03-24T18:30:09Z)
-- Merge strategy: Create commit merge (single logical commit preserved)
-- Pre-merge checklist:
-  - Merge state: CLEAN ✓
-  - Reviews: 0 (none blocking) ✓
-  - Checks: 0 (no failures) ✓
-  - Comments: 0 (no discussion) ✓
-  - Conflicts: None ✓
-- Key artifact: `src/SquadScout.Cloud/NegotiateFunction.cs` — Azure Function trusted boundary (Easy Auth, managed-identity token minting, session groups, localhost fallback)
-- Issue #7: Auto-closed by PR body
-
-**Outcome:**
-- Both PRs now merged to main
-- WS-2 (Function integration) trusted boundary tier complete
-- WS-3 (PubSub routing) unblocked
-- Merge conflict minimized via early merge before dependent work accumulates
-
-### Issue #9 Handoff — Trinity Implementation Complete (2026-03-24T23:39:21Z)
-
-**Status:** MAUI App Shell Scaffolding complete; PR #43 in review (awaiting Switch gate)
-
-**Context:** Trinity completed issue #9 MAUI app shell scaffolding with cross-platform support and chat-like terminal UI. Build green, 36 tests pass. PR #43 opened; Switch begins formal review.
-
-**Impact on Seraph Workstreams:**
-- WS-3 (PubSub routing): Trinity's MAUI client integration now available to pair with Link's relay pipeline (issue #6).
-- WS-4 (token refresh/reconnect): MAUI session bindings ready to receive negotiated tokens from NegotiateFunction (PR #41 already merged).
-- **No blocking dependencies:** Trinity's implementation uses existing shared Contracts; no new contract changes on issue #9 critical path.
-
-**Next:** Awaiting Switch approval. Once PR #43 merges, MAUI client tier can integrate with broker relay pipeline (issue #6, Link/Seraph parallel work).
-
-### Issue #13 / PR #44 Revision — Stop Failure Gate Hardening (2026-03-25)
+### 2026-03-25: Issue #11 — PubSub Client Connection Service
 
 - **Failure-path invariant tightened:** `src\SquadScout.Broker\Relay\InMemorySessionRelay.cs` now reacquires `StopInputGate` before clearing `_stopRequested` after a `TerminateAsync()` failure, so stop-failure recovery stays serialized with input admission instead of reopening the accepted-stop race mid-recovery.
 - **Deterministic proof extended:** `tests\SquadScout.Broker.Tests\SessionRelayPipelineTests.cs` now covers both the successful stop overlap and a failing-stop overlap, using the gateable PTY harness plus the relay's shared stop gate to prove `session_stop_failed` stays blocked behind recovery before input can resume.
@@ -179,3 +97,11 @@
 - **Local dev bridge:** `src\SquadScout.App\Services\PubSubNegotiationClient.cs` sends localhost development identity headers only when the configured negotiate endpoint is loopback and auth mode is `LocalDevelopment`, so local end-to-end work stays practical without weakening the trusted Easy Auth boundary in cloud mode.
 - **UX surface:** `src\SquadScout.App\ViewModels\ActiveSessionViewModel.cs` and `Views\ActiveSessionPage.xaml` now surface live transport state changes continuously and expose an explicit "Retry live transport" flow when the socket faults.
 - **Validation:** In `D:\GitHub\SquadScout-11`, `dotnet build .\SquadScout.slnx -nologo`, `dotnet test .\tests\SquadScout.App.Tests\SquadScout.App.Tests.csproj -nologo`, and `dotnet test .\SquadScout.slnx -nologo --no-build` all passed (72/72 full-suite after the new app transport coverage landed).
+
+### Issue #51 — Web PubSub Upstream Authentication Hardening (2026-03-25)
+
+- **Dual validation path locked:** `src\SquadScout.Functions\Upstream\WebPubSubUpstreamAuthenticator.cs` now authenticates upstream POSTs before any event processing by first checking `WebHook-Request-Origin`, then accepting either a trusted Easy Auth principal inside the Functions host boundary or a valid Web PubSub signature computed from the configured service access key(s) and `ce-connectionId`.
+- **Header compatibility preserved:** The handler treats Azure's documented `ce-signature` header as canonical but also accepts `WebHook-Signature` as an alias so the security follow-up from PR #50 is closed without relying on ambiguous review terminology.
+- **Local/cloud configuration seam:** `src\SquadScout.Functions\Configuration\FunctionsHostOptions.cs` and `local.settings.sample.json` now expose `WebPubSubUpstreamAccessKeys` for local or key-based validation plus `TrustedUpstreamPrincipalIds` for managed-identity/Easy-Auth deployments, keeping cloud auth strict while still practical for local broker work.
+- **Regression coverage expanded:** `tests\SquadScout.Broker.Tests\PubSubUpstreamHandlerTests.cs` now proves accepted signed requests, alias-header acceptance, trusted managed-identity acceptance, and rejected missing/invalid/untrusted requests before the broker forwarder can run.
+- **Validation:** In `D:\GitHub\SquadScout`, `dotnet test .\tests\SquadScout.Broker.Tests\SquadScout.Broker.Tests.csproj -nologo --filter "FullyQualifiedName~PubSubUpstreamHandlerTests"`, `dotnet build .\SquadScout.slnx -nologo`, and `dotnet test .\SquadScout.slnx -nologo --no-build` all passed (focused upstream tests 10/10, full suite 90/90).

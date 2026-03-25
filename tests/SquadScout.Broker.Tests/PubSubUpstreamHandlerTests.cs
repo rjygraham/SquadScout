@@ -1,8 +1,11 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using SquadScout.Functions.Configuration;
 using SquadScout.Contracts.Messages;
 using SquadScout.Contracts.Realtime;
 using SquadScout.Functions.Upstream;
@@ -11,6 +14,12 @@ namespace SquadScout.Broker.Tests;
 
 public sealed class PubSubUpstreamHandlerTests
 {
+    private const string WebsiteInstanceIdEnvironmentVariable = "WEBSITE_INSTANCE_ID";
+    private static readonly object EnvironmentVariableSync = new();
+    private const string WebPubSubOrigin = "squadscout.webpubsub.azure.com";
+    private const string TrustedUpstreamPrincipalId = "webpubsub-mi-01";
+    private const string UpstreamAccessKey = "test-access-key";
+
     [Fact]
     public async Task HandleAsyncForSessionInputEventForwardsEnvelopeToBrokerInputEndpoint()
     {
@@ -35,17 +44,15 @@ public sealed class PubSubUpstreamHandlerTests
             BaseAddress = new Uri("http://127.0.0.1:5071")
         };
 
-        var handler = CreateHandler(httpClient);
+        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
         var envelope = CreateInputEnvelope();
         using var body = CreateJsonBody(envelope);
-        var headers = CreateHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}");
-        headers.Add(WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName, "squadscout.webpubsub.azure.com");
-        headers.Add(WebPubSubUpstreamHandler.CloudEventConnectionIdHeaderName, "conn-123");
+        var headers = CreateSignedHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}");
 
         var response = await handler.HandleAsync("POST", headers, body, CancellationToken.None);
 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-        Assert.Equal("squadscout.webpubsub.azure.com", response.AllowedOrigin);
+        Assert.Equal(WebPubSubOrigin, response.AllowedOrigin);
         Assert.Null(response.Body);
         Assert.NotNull(capturedRequest);
         Assert.Equal("http://127.0.0.1:5071/api/sessions/session-abc/input", capturedRequest!.RequestUri!.ToString());
@@ -74,7 +81,7 @@ public sealed class PubSubUpstreamHandlerTests
             BaseAddress = new Uri("http://127.0.0.1:5071")
         };
 
-        var handler = CreateHandler(httpClient);
+        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
         using var body = CreateJsonBody(new
         {
             projectId = "broker",
@@ -90,7 +97,7 @@ public sealed class PubSubUpstreamHandlerTests
 
         var response = await handler.HandleAsync(
             "POST",
-            CreateHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}"),
+            CreateSignedHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}"),
             body,
             CancellationToken.None);
 
@@ -110,15 +117,15 @@ public sealed class PubSubUpstreamHandlerTests
             BaseAddress = new Uri("http://127.0.0.1:5071")
         };
 
-        var handler = CreateHandler(httpClient);
+        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
         using var body = CreateJsonBody(new { });
         var headers = CreateHeaders();
-        headers.Add(WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName, "squadscout.webpubsub.azure.com");
+        headers.Add(WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName, WebPubSubOrigin);
 
         var response = await handler.HandleAsync("OPTIONS", headers, body, CancellationToken.None);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("squadscout.webpubsub.azure.com", response.AllowedOrigin);
+        Assert.Equal(WebPubSubOrigin, response.AllowedOrigin);
     }
 
     [Fact]
@@ -143,12 +150,12 @@ public sealed class PubSubUpstreamHandlerTests
             BaseAddress = new Uri("http://127.0.0.1:5071")
         };
 
-        var handler = CreateHandler(httpClient);
+        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
         using var body = CreateJsonBody(CreateInputEnvelope());
 
         var response = await handler.HandleAsync(
             "POST",
-            CreateHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}"),
+            CreateSignedHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}"),
             body,
             CancellationToken.None);
 
@@ -168,12 +175,12 @@ public sealed class PubSubUpstreamHandlerTests
             BaseAddress = new Uri("http://127.0.0.1:5071")
         };
 
-        var handler = CreateHandler(httpClient);
+        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
         using var body = CreateJsonBody(CreateInputEnvelope());
 
         var response = await handler.HandleAsync(
             "POST",
-            CreateHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}"),
+            CreateSignedHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}"),
             body,
             CancellationToken.None);
 
@@ -181,8 +188,163 @@ public sealed class PubSubUpstreamHandlerTests
         Assert.Contains("unavailable", response.Body, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static WebPubSubUpstreamHandler CreateHandler(HttpClient httpClient) =>
+    [Fact]
+    public async Task HandleAsyncRejectsMissingSignatureWithoutCallingBroker()
+    {
+        var brokerCalled = false;
+        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
+        {
+            brokerCalled = true;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }))
+        {
+            BaseAddress = new Uri("http://127.0.0.1:5071")
+        };
+
+        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
+        using var body = CreateJsonBody(CreateInputEnvelope());
+        var headers = CreateHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}");
+        headers.Add(WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName, WebPubSubOrigin);
+        headers.Add(WebPubSubUpstreamHandler.CloudEventConnectionIdHeaderName, "conn-123");
+
+        var response = await handler.HandleAsync("POST", headers, body, CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains("signature", response.Body, StringComparison.OrdinalIgnoreCase);
+        Assert.False(brokerCalled);
+    }
+
+    [Fact]
+    public async Task HandleAsyncRejectsInvalidSignatureWithoutCallingBroker()
+    {
+        var brokerCalled = false;
+        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
+        {
+            brokerCalled = true;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }))
+        {
+            BaseAddress = new Uri("http://127.0.0.1:5071")
+        };
+
+        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
+        using var body = CreateJsonBody(CreateInputEnvelope());
+        var headers = CreateHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}");
+        headers.Add(WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName, WebPubSubOrigin);
+        headers.Add(WebPubSubUpstreamHandler.CloudEventConnectionIdHeaderName, "conn-123");
+        headers.Add(WebPubSubUpstreamAuthenticator.CloudEventSignatureHeaderName, "sha256=deadbeef");
+
+        var response = await handler.HandleAsync("POST", headers, body, CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains("signature", response.Body, StringComparison.OrdinalIgnoreCase);
+        Assert.False(brokerCalled);
+    }
+
+    [Fact]
+    public async Task HandleAsyncAcceptsWebHookSignatureAlias()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
+        {
+            capturedRequest = request;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }))
+        {
+            BaseAddress = new Uri("http://127.0.0.1:5071")
+        };
+
+        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
+        using var body = CreateJsonBody(CreateInputEnvelope());
+        var headers = CreateHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}");
+        headers.Add(WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName, WebPubSubOrigin);
+        headers.Add(WebPubSubUpstreamHandler.CloudEventConnectionIdHeaderName, "conn-123");
+        headers.Add(
+            WebPubSubUpstreamAuthenticator.WebHookSignatureHeaderName,
+            ComputeSignature(UpstreamAccessKey, "conn-123"));
+
+        var response = await handler.HandleAsync("POST", headers, body, CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.NotNull(capturedRequest);
+    }
+
+    [Fact]
+    public async Task HandleAsyncAcceptsTrustedManagedIdentityRequestWithoutSignature()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
+        {
+            capturedRequest = request;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }))
+        {
+            BaseAddress = new Uri("http://127.0.0.1:5071")
+        };
+
+        var handler = CreateHandler(
+            httpClient,
+            new FunctionsHostOptions
+            {
+                WebPubSubEndpoint = $"https://{WebPubSubOrigin}",
+                BrokerBaseUrl = "http://127.0.0.1:5071",
+                TrustedUpstreamPrincipalIds = [TrustedUpstreamPrincipalId]
+            });
+        using var body = CreateJsonBody(CreateInputEnvelope());
+        var headers = CreateHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}");
+        headers.Add(WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName, WebPubSubOrigin);
+        headers.Add("x-ms-client-principal-id", TrustedUpstreamPrincipalId);
+
+        var response = await WithEnvironmentVariable(
+            WebsiteInstanceIdEnvironmentVariable,
+            "trusted-boundary",
+            () => handler.HandleAsync("POST", headers, body, CancellationToken.None));
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.NotNull(capturedRequest);
+    }
+
+    [Fact]
+    public async Task HandleAsyncRejectsUntrustedManagedIdentityRequest()
+    {
+        var brokerCalled = false;
+        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
+        {
+            brokerCalled = true;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }))
+        {
+            BaseAddress = new Uri("http://127.0.0.1:5071")
+        };
+
+        var handler = CreateHandler(
+            httpClient,
+            new FunctionsHostOptions
+            {
+                WebPubSubEndpoint = $"https://{WebPubSubOrigin}",
+                BrokerBaseUrl = "http://127.0.0.1:5071",
+                TrustedUpstreamPrincipalIds = [TrustedUpstreamPrincipalId]
+            });
+        using var body = CreateJsonBody(CreateInputEnvelope());
+        var headers = CreateHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}");
+        headers.Add(WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName, WebPubSubOrigin);
+        headers.Add("x-ms-client-principal-id", "unexpected-principal");
+
+        var response = await WithEnvironmentVariable(
+            WebsiteInstanceIdEnvironmentVariable,
+            "trusted-boundary",
+            () => handler.HandleAsync("POST", headers, body, CancellationToken.None));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains("principal", response.Body, StringComparison.OrdinalIgnoreCase);
+        Assert.False(brokerCalled);
+    }
+
+    private static WebPubSubUpstreamHandler CreateHandler(HttpClient httpClient, FunctionsHostOptions? options = null) =>
         new(
+            new WebPubSubUpstreamAuthenticator(
+                Options.Create(options ?? CreateOptionsWithAccessKey()),
+                NullLogger<WebPubSubUpstreamAuthenticator>.Instance),
             new BrokerInputForwarder(httpClient),
             NullLogger<WebPubSubUpstreamHandler>.Instance);
 
@@ -194,6 +356,19 @@ public sealed class PubSubUpstreamHandlerTests
             headers.Add(WebPubSubUpstreamHandler.CloudEventTypeHeaderName, cloudEventType);
         }
 
+        return headers;
+    }
+
+    private static HttpHeadersCollection CreateSignedHeaders(
+        string cloudEventType,
+        string connectionId = "conn-123")
+    {
+        var headers = CreateHeaders(cloudEventType);
+        headers.Add(WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName, WebPubSubOrigin);
+        headers.Add(WebPubSubUpstreamHandler.CloudEventConnectionIdHeaderName, connectionId);
+        headers.Add(
+            WebPubSubUpstreamAuthenticator.CloudEventSignatureHeaderName,
+            ComputeSignature(UpstreamAccessKey, connectionId));
         return headers;
     }
 
@@ -215,7 +390,39 @@ public sealed class PubSubUpstreamHandlerTests
             {
                 Content = "status --json\n"
             }
+         };
+
+    private static FunctionsHostOptions CreateOptionsWithAccessKey() =>
+        new()
+        {
+            WebPubSubEndpoint = $"https://{WebPubSubOrigin}",
+            BrokerBaseUrl = "http://127.0.0.1:5071",
+            WebPubSubUpstreamAccessKeys = [UpstreamAccessKey]
         };
+
+    private static string ComputeSignature(string accessKey, string connectionId)
+    {
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(accessKey));
+        var hashBytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(connectionId));
+        return $"sha256={Convert.ToHexString(hashBytes)}";
+    }
+
+    private static Task<T> WithEnvironmentVariable<T>(string name, string? value, Func<Task<T>> action)
+    {
+        lock (EnvironmentVariableSync)
+        {
+            var original = Environment.GetEnvironmentVariable(name);
+            try
+            {
+                Environment.SetEnvironmentVariable(name, value);
+                return Task.FromResult(action().GetAwaiter().GetResult());
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(name, original);
+            }
+        }
+    }
 
     private sealed class DelegateHttpMessageHandler : HttpMessageHandler
     {
