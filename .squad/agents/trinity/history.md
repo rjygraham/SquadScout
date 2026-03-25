@@ -25,6 +25,23 @@
 - **TTS/STT mandated for Phase 3.** On-the-go use case (including driving) requires accessibility; not optional.
 - **Status:** WS-4 (TTS incoming) and WS-5 (STT outgoing) promoted to Phase 3 deliverables. Trinity ready to scaffold MAUI project and begin WS-4.
 
+### 2026-03-24T18:15:00Z — Issue #9 Shell Scaffold Landed
+
+- **Shell shape:** The MAUI app now uses a single-user, navigation-based architecture.
+  - Entry point: project selection page (browse local repos, assign as "active project").
+  - Terminal flow: session creation from active project → session terminal page.
+  - Service composition: DI container registers auth (token cache), messaging (PubSub client), project state, session lifecycle.
+- **Environment config:** Development fallbacks pre-configured (mock auth, in-memory project store, no Entra/PubSub required for debug builds).
+- **Tests:** 6 unit tests cover shell composition, dev config, and session state updates.
+- **PR #43 merge status:** Awaiting Switch review handoff.
+
+### 2026-03-24T23:58:00Z — PR #43 Merged; Phase 1 Milestone Complete
+
+- **Merge result:** PR #43 (Implement MAUI app shell scaffolding) successfully merged to main via GitHub.
+- **Verification:** 36/36 tests pass, clean build, no conflicts, issue #9 auto-closed.
+- **Phase 1 status:** Core shell is in place; ready for WS-2 (session datapath integration with messaging broker).
+- **Next: WS-2 kickoff** depends on Switch team confirmation of message envelope contract. Morpheus will handle token validation; Link provides endpoints.
+
 ### 2026-03-24T17:31:17Z — GitHub Issues Backlog Imported
 
 - **Import context:** Neo created GitHub issues #1–#34 in rjygraham/SquadScout with full phase gate preservation and routing labels.
