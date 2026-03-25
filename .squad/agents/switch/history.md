@@ -198,6 +198,27 @@
 - **Tracking inconsistency:** the branch name references issue `#31`, but GitHub issue `#31` is currently structured logging/correlation IDs, not Aspire / ServiceDefaults.
 - **Revision owner recommendation:** Link should own the next revision because the missing work is primarily solution/orchestration scaffolding; Seraph is locked out for the next revision cycle on this artifact.
 
+### Issue #12 Token Validation & Session Claims — Morpheus Complete (2026-03-25T00:20:09Z)
+
+**Status:** Implementation complete. Token validation middleware and session claims hardening integrated. PR #45 opened (closes #12). Ready for Switch formal review gate.
+
+**Morpheus Deliverables:**
+- `src\SquadScout.Broker\Middleware\TokenValidationMiddleware.cs` — Bearer token extraction, validation, expiration enforcement
+- `src\SquadScout.Broker\Services\SessionClaimsValidator.cs` — Session claim verification, project ownership binding
+- Token lifecycle: extraction from HTTP headers, signature verification, expiration checks
+- Claims binding: project ownership, user context, immutability constraints
+- Broker authentication hardening integrated with session state machine
+- Full test coverage; all tests passing
+
+**Build & Test Status:**
+- ✅ Solution builds cleanly
+- ✅ All tests pass (baseline maintained)
+- ✅ Branch: `squad/12-token-validation-session-claims-hardening`
+- ✅ Commit: 5e7f232
+- ✅ PR: #45 (no conflicts, ready for review)
+
+**Handoff:** WS-2 token validation critical path. Morpheus awaits Switch formal review gate on PR #45. If revision needed, Link assumes ownership per team protocol.
+
 
 - **Artifact reviewed:** PR #43 / branch `squad/9-maui-app-shell-scaffolding` at commit `84d7300`
 - **Verdict:** **APPROVED**

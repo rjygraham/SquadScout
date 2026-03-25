@@ -47,3 +47,4 @@
 - Seraph activated for merge-watch mode to monitor PR #44 merge to main.
 - Merge readiness caveat: GitHub reports `mergeable_state: dirty`; branch reconciliation required before merge even though reviewer bar satisfied.
 - **Timestamp discipline:** Use ISO 8601 hyphenated format (e.g., `2026-03-25T00:17:15Z`) for consistency with squad file naming conventions.
+- Formal review gate activated; Switch to evaluate PR #45 for token validation completeness and security posture.
