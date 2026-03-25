@@ -22,11 +22,31 @@
                         <Label Text="{Binding SessionSummary}" />
                         <Label
                             FontSize="12"
+                            IsVisible="{Binding HasActiveSession}"
+                            Text="{Binding SessionState, StringFormat='State: {0}'}"
+                            TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray300}}" />
+                        <Label
+                            FontSize="12"
+                            IsVisible="{Binding HasActiveSession}"
+                            Text="{Binding StartedAt, StringFormat='Started: {0}'}"
+                            TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray300}}" />
+                        <Label
+                            FontSize="12"
                             Text="{Binding ProjectName, StringFormat='Project: {0}'}"
                             TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray300}}" />
                         <Label
                             FontSize="12"
+                            IsVisible="{Binding HasActiveSession}"
+                            Text="{Binding ProjectRoot}"
+                            TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray300}}" />
+                        <Label
+                            FontSize="12"
                             Text="{Binding SessionId, StringFormat='Session: {0}'}"
+                            TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray300}}" />
+                        <Label
+                            FontSize="12"
+                            IsVisible="{Binding HasActiveSession}"
+                            Text="{Binding SourceSummary}"
                             TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray300}}" />
                         <Label
                             FontSize="12"
@@ -41,10 +61,12 @@
                         JustifyContent="Start">
                         <Button
                             Command="{Binding ReconnectLiveTransportCommand}"
+                            IsVisible="{Binding HasActiveSession}"
                             Margin="0,0,10,10"
                             Text="Reconnect" />
                         <Button
                             Command="{Binding RefreshStatusCommand}"
+                            IsVisible="{Binding HasActiveSession}"
                             Margin="0,0,10,10"
                             Text="Refresh" />
                         <Button
@@ -53,9 +75,15 @@
                             Text="Projects" />
                         <Button
                             Command="{Binding ClearLocalShellContextCommand}"
+                            IsVisible="{Binding HasActiveSession}"
                             Margin="0,0,10,10"
                             Text="Clear" />
                     </FlexLayout>
+
+                    <Label
+                        FontSize="12"
+                        Text="{Binding NavigationHint}"
+                        TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray300}}" />
                 </VerticalStackLayout>
             </Border>
 
@@ -146,6 +174,10 @@
                         <Label
                             HorizontalTextAlignment="Center"
                             Text="{Binding EmptyStateDescription}" />
+                        <Button
+                            Command="{Binding ReturnToProjectsCommand}"
+                            IsVisible="{Binding ShowProjectPickerAction}"
+                            Text="Choose a project" />
                     </VerticalStackLayout>
                 </Grid>
             </CollectionView.EmptyView>
@@ -283,6 +315,7 @@
 
         <Border
             Grid.Row="2"
+            IsVisible="{Binding HasActiveSession}"
             Margin="20,12,20,24"
             Padding="14"
             StrokeShape="RoundRectangle 24">

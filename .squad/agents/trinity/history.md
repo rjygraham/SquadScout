@@ -19,6 +19,10 @@
 
 - **Audio as Differentiator:** TTS + STT are full workstreams (WS-4/5), not afterthoughts. They require platform-specific testing (iOS/Android microphone/speaker perms) and deserve dedicated effort and design review for UX (record button prominence, confidence feedback).
 
+- **Single-Session Handoff Pattern:** For the MAUI picker → transcript flow, never let a generic "Start" action silently resume or replace an in-focus session. When a session already exists, the projects screen should pivot to resume-first copy plus explicit warnings so the one-user/one-focused-session constraint is visible before navigation.
+
+- **ViewModel-Driven UX State Pattern:** Loading, empty, stale-selection, retry, and resume states fit best as computed view-model properties feeding XAML cards/empty views instead of new broker/auth APIs. Key polish paths for this pattern are `src\SquadScout.App\ViewModels\ProjectSelectionViewModel.cs`, `src\SquadScout.App\Views\ProjectSelectionPage.xaml`, `src\SquadScout.App\ViewModels\ActiveSessionViewModel.cs`, `src\SquadScout.App\Views\ActiveSessionPage.xaml`, and `src\SquadScout.App\Navigation\ShellNavigator.cs`.
+
 ### User Directives Accepted (2026-03-24)
 
 - **Native chat UX confirmed.** No terminal-style rendering; SkiaSharp/xterm.js deferred indefinitely.
@@ -69,4 +73,15 @@
 - **PR state:** GitHub shows PR #49 mergeable with `mergeable_state: clean`, but there are currently no reviews, no review comments, and no check runs on the head commit, so the approval gate has not been met.
 - **Merge choice when unblocked:** Preferred path is **squash merge** once Switch approves because the branch is 17 commits ahead of `main` and includes a merge-from-main plus squad coordination commits that would create avoidable history noise if preserved.
 - **Issue closure check:** The PR body still contains `closes #10`, so keeping the body intact at merge time will auto-close the transcript UI issue correctly.
+
+### 2026-03-25T17:26:59Z — Issue #15 MAUI Project & Session UX Polish Complete
+
+- **Scope completed:** Single-session handoff pattern (project picker → session transcript) now enforced through explicit state visualization at the ViewModel seam.
+- **UX states implemented:** Loading, empty, stale-selection, retry, and resume states expressed as computed ViewModel properties → XAML conditional rendering.
+- **Active session gating:** When a session is already in focus, projects page shows resume-first affordances and warnings instead of letting "Start session" silently resume or replace the session.
+- **Navigation hardening:** ShellNavigator prevents invalid session state transitions; clear separation between projects-page and active-session-page flows.
+- **Test coordination:** Acceptance bar moved to ViewModel seam per Switch agreement; `MobileShellScaffoldTests.cs` remains untouched for parallel work.
+- **Verification:** Full solution build passed; full no-build test suite passed.
+- **Files:** ShellNavigator.cs, ActiveSessionViewModel.cs, ProjectSelectionViewModel.cs, ActiveSessionPage.xaml, ProjectSelectionPage.xaml, history.md, skills.
+- **Status:** ✅ COMPLETE — Ready for WS-2 phase (session datapath integration).
 

@@ -13,6 +13,8 @@
 - **Security Pattern:** Use `CryptographicOperations.FixedTimeEquals` for signature verification to prevent timing attacks.
 - **Azure Functions Identity:** Trusting `x-ms-client-principal-id` requires verifying `WEBSITE_INSTANCE_ID` is present to ensure the request is from the Azure platform (Easy Auth boundary).
 - **Testing:** `PubSubUpstreamHandlerTests` uses a `DelegateHttpMessageHandler` to mock `HttpClient` responses, allowing full integration-style testing of the handler logic without a real broker.
+- **MAUI app test harness:** `tests\SquadScout.App.Tests\SquadScout.App.Tests.csproj` links selected `src\SquadScout.App` source files directly, so new view-model tests can exercise production logic without referencing the MAUI app project.
+- **MAUI seam pattern:** Lightweight test doubles for `IAppNavigator` plus a local `MainThread` shim are enough to unit-test `ProjectSelectionViewModel` and `ActiveSessionViewModel` in `tests\SquadScout.App.Tests\ProjectSelectionViewModelTests.cs` and `tests\SquadScout.App.Tests\ActiveSessionViewModelTests.cs`.
 
 
 ### Workstream Decomposition (2026-03-24)
@@ -354,3 +356,28 @@
 - Request authentication runs before JSON parsing, preventing forged envelopes from reaching broker
 
 **Verdict:** **APPROVED** — implementation is production-ready. Ready for merge.
+
+### Issue #15 MAUI Project & Session UX Polish — 2026-03-25T17:26:59Z
+
+**Trinity Scope Completed:**
+- Single-session handoff pattern (project picker → session transcript) now fully enforced via explicit ViewModel state visualization
+- Loading/empty/stale-selection/retry states expressed as computed properties feeding XAML conditionals
+- Active session gating prevents silent resume, provides resume-first affordances and warnings
+- Shell navigation hardened to prevent invalid state transitions
+- Coordination with Switch: acceptance bar moved to ViewModel seam; MobileShellScaffoldTests remains untouched
+
+**Switch Scope Completed:**
+- ProjectSelectionViewModelTests: loading, empty, invalid refresh, active session gating, start success
+- ActiveSessionViewModelTests: no-session, pending broker, invalid refresh, reconnect failure, dev fallback
+- Lightweight test doubles (IAppNavigator, MainThread shim) enable isolated unit testing without XAML compilation
+- Full app test project passed; targeted tests passed
+
+**Files Modified:**
+- Mobile: ShellNavigator.cs, ActiveSessionViewModel.cs, ProjectSelectionViewModel.cs, ActiveSessionPage.xaml, ProjectSelectionPage.xaml
+- Tests: ProjectSelectionViewModelTests.cs, ActiveSessionViewModelTests.cs, ViewModelTestDoubles.cs, test project config
+- Docs: Trinity history, Switch history, skills
+
+**Verification:** Full solution build ✅ | Full test suite (no-build) ✅ | Acceptance bar met at ViewModel seam ✅
+
+**Status:** ✅ **COMPLETE** — Ready for WS-2 phase (session datapath integration with Link/Morpheus).
+

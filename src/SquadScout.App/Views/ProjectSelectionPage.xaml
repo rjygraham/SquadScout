@@ -18,7 +18,7 @@
                         <Label
                             FontAttributes="Bold"
                             FontSize="32"
-                            Text="Project selection" />
+                            Text="Pick a project" />
                         <Label
                             FontSize="16"
                             Text="{Binding LowConcurrencySummary}" />
@@ -31,7 +31,7 @@
                             <Label
                                 FontAttributes="Bold"
                                 FontSize="18"
-                                Text="Client composition" />
+                                Text="Mobile session shell" />
                             <Label Text="{Binding EnvironmentSummary}" />
                             <Label Text="{Binding AuthenticationSummary}" />
                             <Label
@@ -52,23 +52,65 @@
                             <Label
                                 FontAttributes="Bold"
                                 FontSize="18"
-                                Text="Active session in shell" />
+                                Text="Continue current session" />
                             <Label Text="{Binding SessionSummary}" />
+                            <Label Text="{Binding SessionActionDescription}" />
                             <Button
                                 Command="{Binding ResumeActiveSessionCommand}"
                                 Text="Resume active session" />
                         </VerticalStackLayout>
                     </Border>
+
+                    <Border
+                        IsVisible="{Binding IsRefreshing}"
+                        Padding="16"
+                        StrokeShape="RoundRectangle 16">
+                        <HorizontalStackLayout Spacing="12">
+                            <ActivityIndicator
+                                IsRunning="{Binding IsRefreshing}"
+                                VerticalOptions="Center" />
+                            <Label
+                                VerticalOptions="Center"
+                                Text="Refreshing the project list…" />
+                        </HorizontalStackLayout>
+                    </Border>
+
+                    <Border
+                        IsVisible="{Binding HasSelectionWarning}"
+                        Padding="16"
+                        BackgroundColor="#FFF4DD"
+                        StrokeShape="RoundRectangle 16">
+                        <VerticalStackLayout Spacing="6">
+                            <Label
+                                FontAttributes="Bold"
+                                FontSize="16"
+                                Text="{Binding SelectionWarningTitle}" />
+                            <Label Text="{Binding SelectionWarningMessage}" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <Label
+                        FontAttributes="Bold"
+                        FontSize="18"
+                        IsVisible="{Binding HasProjects}"
+                        Text="Registered projects" />
                 </VerticalStackLayout>
             </CollectionView.Header>
 
             <CollectionView.EmptyView>
                 <VerticalStackLayout Padding="20,0,20,0" Spacing="12">
+                    <ActivityIndicator
+                        IsRunning="{Binding IsRefreshing}"
+                        IsVisible="{Binding IsRefreshing}" />
                     <Label
                         FontAttributes="Bold"
                         FontSize="18"
-                        Text="No projects loaded" />
-                    <Label Text="Start the local broker or rely on the configured development seeds." />
+                        Text="{Binding ProjectsStateTitle}" />
+                    <Label Text="{Binding ProjectsStateDescription}" />
+                    <Button
+                        Command="{Binding RefreshCommand}"
+                        IsEnabled="{Binding CanRetryProjects}"
+                        Text="Retry project load" />
                 </VerticalStackLayout>
             </CollectionView.EmptyView>
 
@@ -99,13 +141,37 @@
             <CollectionView.Footer>
                 <VerticalStackLayout Padding="20,4,20,32" Spacing="16">
                     <Border
+                        IsVisible="{Binding HasSelectedProject}"
+                        Padding="16"
+                        StrokeShape="RoundRectangle 16">
+                        <VerticalStackLayout Spacing="8">
+                            <Label
+                                FontAttributes="Bold"
+                                FontSize="18"
+                                Text="Selected project" />
+                            <Label
+                                FontAttributes="Bold"
+                                FontSize="18"
+                                Text="{Binding SelectedProjectName}" />
+                            <Label Text="{Binding SelectedProjectSummary}" />
+                            <Label
+                                FontSize="12"
+                                LineBreakMode="CharacterWrap"
+                                Text="{Binding SelectedProjectPath}"
+                                TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray300}}" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <Border
+                        IsVisible="{Binding ShowSessionStartCard}"
                         Padding="16"
                         StrokeShape="RoundRectangle 16">
                         <VerticalStackLayout Spacing="12">
                             <Label
                                 FontAttributes="Bold"
                                 FontSize="18"
-                                Text="Session initiation scaffold" />
+                                Text="{Binding SessionActionTitle}" />
+                            <Label Text="{Binding SessionActionDescription}" />
                             <Label Text="Requested by" />
                             <Entry
                                 Placeholder="mobile-user"
@@ -116,7 +182,7 @@
                                 Text="{Binding CommandArguments}" />
                             <Button
                                 Command="{Binding StartSessionCommand}"
-                                Text="Start pending session" />
+                                Text="Start session" />
                         </VerticalStackLayout>
                     </Border>
                 </VerticalStackLayout>
