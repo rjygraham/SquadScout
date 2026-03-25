@@ -7,6 +7,20 @@
 - Stack: .NET broker, .NET MAUI, Azure Web PubSub, Azure Function, Microsoft Entra, and Orleans under evaluation.
 - Key concerns: authentication, replay correctness, reconnect reliability, and performance under intermittent connectivity.
 
+## Core Context
+
+### Phase 1 Session Telemetry & Replay Diagnostics (Issue #17, PR #57)
+
+**Completion Decision:** PR #57 approved and merged (2026-03-25, commit `57ebc0a`). Phase 1 session telemetry foundation complete.
+
+- **Security Baseline Extended:** `SecretRedactor.Redact(JsonElement)` added with property-name and value-content scanning
+- **Sensitive Property Pattern:** Covers authorization, password, token, secret, apikey, accesskey, sharedaccesskey, accountkey, sig, code, access_token, client_secret
+- **Trust Boundary:** WebPubSubUpstreamHandler validation unchanged; Phase 1 session group validation added; upstream auth tests 14/14 passing
+- **Replay Semantics:** Capacity configurable (default 500); generation reset returns empty window with `gapDetected=true`; reconnect invariants maintained
+- **Test Coverage:** Full suite 108/108 passing (25 App, 83 Broker); security baseline 8/8; replay tests 6/6; telemetry snapshot tests 2/2; upstream handler tests 6/6
+- **Non-blocking Advisory:** Telemetry export creates full snapshot on each request (acceptable for Phase 1 manual diagnostics; recommend rate-limiting or snapshot cache for Phase 4 if polling becomes automated)
+- **Outcome:** Phase 1 security posture hardened; telemetry diagnostics enabled; Phase 2 Orleans integration unblocked
+
 ## Learnings
 
 ### Cross-Cutting Workstream Decomposition (2026-03-24)
@@ -48,6 +62,29 @@
 
 1. **Sequence ownership undefined:** Contract does not distinguish broker-owned replay frames from client-authored traffic; risks client sequences being treated as replay domain input.
 2. **Replay reset boundary unsafe:** No generation/epoch marker; reconnecting client cannot distinguish resumed state from fresh stream after broker/PTY restart.
+
+### Formal Review — Issue #17 / PR #57 (2026-03-25T17:48:31Z)
+
+**Context:** Phase 1 telemetry diagnostics — minimal broker-sourced replay/validation context export to enable failure reconstruction without external services.
+
+**Security audit findings:**
+
+1. ✅ **Secret safety baseline preserved:** `SecretRedactor.Redact(JsonElement)` method added with comprehensive property-name and value-content scanning. New `SensitivePropertyNamePattern` regex covers authorization, password, token, secret, apikey, accesskey, sharedaccesskey, accountkey, sig, code, access_token, client_secret fields. Existing string redaction patterns (JWTs, GitHub tokens, bearer headers, connection strings, query params) remain intact. All payload previews pass through `SecretRedactor.Redact()` before telemetry buffer storage.
+2. ✅ **Trust-boundary enforcement stable:** WebPubSubUpstreamHandler validation unchanged except for enhanced correlation logging (connectionId, projectId, sessionGroup). Phase 1 session group validation (`TryResolvePhaseOneSessionGroup`) added explicitly before broker forwarding. All upstream authentication tests pass (8/8 SecurityBaseline, 6/6 PubSubUpstreamHandler).
+3. ✅ **Replay correctness maintained:** Replay buffer capacity configurable, generation reset boundary returns empty window with `gapDetected=true`, overflow detection preserved. All replay/ordering tests pass (6/6 InMemorySessionOrchestratorReplay, 87/87 broker suite). Telemetry export is read-only snapshot; no mutation of runtime sequencing state.
+4. ✅ **Reconnect semantics unchanged:** Client message gate, generation reset, sequence validation all untouched. New telemetry buffers (SessionTelemetryBuffer) are circular ring buffers with fixed capacity; no unbounded memory growth risk.
+
+**Performance audit findings:**
+
+1. ⚠️ **Non-blocking issue:** Telemetry export creates full snapshot on every GET request. No caching, no incremental delta. Acceptable for Phase 1 diagnostic use (low-frequency manual invocation), but risks contention on `SessionRuntimeState.SyncRoot` under high export frequency. Recommend rate-limiting or last-snapshot cache for production deployments if telemetry polling becomes automated.
+2. ✅ **Bounded buffer overhead:** Two new 32-element envelope ring buffers + 64-element event ring buffer per session. All bounded, no allocation storms. Payload preview capped at 512 chars after redaction.
+3. ✅ **No new async paths or cancellation holes:** Telemetry export is synchronous snapshot inside existing orchestrator lock.
+
+**Verdict: APPROVED with non-blocking advisory.**
+
+**Rationale:** All Phase 1 acceptance criteria met. Secret safety baseline extended correctly. Trust boundaries preserved. Replay/reconnect semantics untouched. Full regression suite passes (108/108 total). Telemetry export performance acceptable for Phase 1 manual diagnostics; production deployments should add rate-limiting if automated polling becomes frequent.
+
+**Non-blocking advisory:** Consider snapshot caching or rate-limiting for `/api/sessions/{sessionId}/telemetry` endpoint before Phase 2 if automated health monitoring or log aggregation tools begin polling telemetry continuously.
 
 **Next revision ownership:** Link (Switch sits out correction cycle). Morpheus will re-review replay semantics before merge.
 
