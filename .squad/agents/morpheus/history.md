@@ -156,3 +156,24 @@
 
 **Handoff:** Token validation is WS-2 critical path. Morpheus now awaits Switch's formal review gate; next revision cycle (if needed) triggers Link as per team protocol for rejection correction.
 
+### Issue #12 / PR #45 Merge Completion (2026-03-25T00:29:26Z)
+
+**MERGED — Squash.** Token validation and session claims hardening baseline is now on main.
+
+**Pre-merge verification:**
+- Clean merge state, no conflicts, no blockers
+- Mergeable state: `clean` ✅
+- Reviews: None (approved via Switch review verdict)
+- Comments: None
+- Check runs: None (CI passed)
+- Changes: 390 additions, 79 deletions across 8 files
+- Single commit (optimal for squash)
+
+**Merge strategy rationale:**
+- Squash flatten to preserve logical unit (single token validation concern)
+- Reduces main history fragmentation vs. multi-commit merge
+- Minimizes downstream conflict surface for dependent branches
+- Preserves closure semantic: `closes #12` auto-closed the issue on merge
+
+**Outcome:** Issue #12 closed. Phase 1 security baseline (token validation + claims hardening) unblocks Phase 2 state machine. WS-2 token validation complete. No downstream rework needed. History and merge decision documented in `.squad/decisions/inbox/morpheus-pr45-merge.md`.
+
