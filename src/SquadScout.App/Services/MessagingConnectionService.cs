@@ -417,8 +417,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 return true;
 
             case "message":
-                await ProcessGroupMessageAsync(root, cancellationToken).ConfigureAwait(false);
-                return true;
+                return await ProcessGroupMessageAsync(root, cancellationToken).ConfigureAwait(false);
 
             default:
                 PublishReceiveFault($"The live session stream returned unsupported message type '{type}'.");
@@ -471,13 +470,13 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         }
     }
 
-    private async Task ProcessGroupMessageAsync(JsonElement root, CancellationToken cancellationToken)
+    private async Task<bool> ProcessGroupMessageAsync(JsonElement root, CancellationToken cancellationToken)
     {
         if (!root.TryGetProperty("dataType", out var dataTypeElement) ||
             !string.Equals(dataTypeElement.GetString(), "json", StringComparison.OrdinalIgnoreCase))
         {
             PublishReceiveFault("The live session stream returned a non-JSON group message, which the mobile transport cannot process.");
-            return;
+            return false;
         }
 
         var data = root.GetProperty("data").Clone();
@@ -486,13 +485,12 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
 
         if (TryRejectStaleBrokerEnvelope(envelope, $"incoming {envelope.MessageType} envelope"))
         {
-            return;
+            return false;
         }
 
         if (envelope.MessageType == SessionMessageType.ReplayResponse)
         {
-            await ApplyReplayResponseAsync(envelope, cancellationToken).ConfigureAwait(false);
-            return;
+            return await ApplyReplayResponseAsync(envelope, cancellationToken).ConfigureAwait(false);
         }
 
         var gapJustDetected = TrackBrokerSequence(envelope);
@@ -516,9 +514,11 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
 
             QueueReplayRequest(ReplayRequestReason.GapDetected, cancellationToken);
         }
+
+        return true;
     }
 
-    private async Task ApplyReplayResponseAsync(
+    private async Task<bool> ApplyReplayResponseAsync(
         MessageEnvelope<JsonElement> envelope,
         CancellationToken cancellationToken)
     {
@@ -539,7 +539,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 payload.Generation,
                 envelope.Generation,
                 "replay payload");
-            return;
+            return false;
         }
 
         AppendTraffic(
@@ -566,7 +566,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                     replayedEnvelope.Generation,
                     envelope.Generation,
                     $"replayed {replayedEnvelope.MessageType} envelope");
-                return;
+                return false;
             }
 
             TrackBrokerSequence(replayedEnvelope);
@@ -588,6 +588,8 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 PublishStatus(restoredStatus);
             }
         }
+
+        return true;
     }
 
     private bool TrackBrokerSequence(MessageEnvelope<JsonElement> envelope)

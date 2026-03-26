@@ -755,6 +755,10 @@ public sealed class PubSubConnectionServiceTests
             service.RecentTraffic[^1].Summary,
             StringComparison.OrdinalIgnoreCase);
 
+        firstSocket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 2, generation: 2, content: "should-not-apply")));
+        await Task.Delay(100);
+        Assert.Equal(4, service.RecentTraffic.Count);
+
         var reconnectStatus = await service.ReconnectAsync();
         await WaitForAsync(() => secondSocket.SentTexts.Count >= 2);
 
@@ -813,6 +817,11 @@ public sealed class PubSubConnectionServiceTests
         Assert.Contains("Rejected incoming ReplayResponse envelope", replayResponse.Summary, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("stale generation 1", service.CurrentStatus.Summary, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("already on generation 2", service.CurrentStatus.FailureReason!, StringComparison.OrdinalIgnoreCase);
+
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 2, generation: 2, content: "should-not-apply")));
+        await Task.Delay(100);
+        Assert.Equal(4, service.RecentTraffic.Count);
+
         Assert.DoesNotContain(
             service.RecentTraffic,
             traffic => traffic.Summary.Contains("Applied replayed", StringComparison.OrdinalIgnoreCase));
