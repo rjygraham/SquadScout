@@ -23,6 +23,8 @@
 
 - **ViewModel-Driven UX State Pattern:** Loading, empty, stale-selection, retry, and resume states fit best as computed view-model properties feeding XAML cards/empty views instead of new broker/auth APIs. Key polish paths for this pattern are `src\SquadScout.App\ViewModels\ProjectSelectionViewModel.cs`, `src\SquadScout.App\Views\ProjectSelectionPage.xaml`, `src\SquadScout.App\ViewModels\ActiveSessionViewModel.cs`, `src\SquadScout.App\Views\ActiveSessionPage.xaml`, and `src\SquadScout.App\Navigation\ShellNavigator.cs`.
 
+- **Generation Monotonicity Guardrail:** The MAUI transport must reject any broker envelope that arrives with a generation lower than the session's active generation, and replay payload/message generations must match the replay envelope boundary. When that invariant breaks, the mobile client should preserve transcript continuity, surface a durable fault, and require reconnect before trusting the stream again.
+
 ### User Directives Accepted (2026-03-24)
 
 - **Native chat UX confirmed.** No terminal-style rendering; SkiaSharp/xterm.js deferred indefinitely.
