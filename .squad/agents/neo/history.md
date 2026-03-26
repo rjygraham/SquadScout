@@ -168,3 +168,23 @@
 - **Key Learning:** Honest issue framing sets correct implementer expectations; clarification/observability work is legitimate Phase 1 scope
 
 **Next:** Monitor both issues for cross-cutting concerns; no coordination dependencies identified.
+
+### 2026-03-26 — Issue #63 Documentation Accuracy Pass (Commit 1d364bf)
+
+- **Scope:** Accuracy pass on Phase 1 broker documentation (README.md, BROKER_SETUP.md, QUICK_START.md).
+- **Mismatches fixed:**
+  - All endpoint paths corrected to include `/api` prefix (was missing throughout)
+  - Session endpoints corrected from `/sessions/{projectId}/...` to `/api/sessions` (POST start) and `/api/sessions/{sessionId}/...` (GET, POST stop/input)
+  - Removed `GET /projects/{projectId}` endpoint (not implemented in Program.cs)
+  - Removed WebSocket endpoint claims (`/ws/sessions/{sessionId}` not implemented in Phase 1)
+  - Clarified `/alive` is Development environment only
+  - Added `/api/sessions/{sessionId}/telemetry` endpoint (Phase 1 diagnostics)
+  - Changed `workingDirectory` field to `repositoryRoot` (matches RegisteredProject contract)
+  - Documented `StartSessionCommand` fields: `ProjectId`, `RequestedBy`, `Arguments`
+  - Documented `StopSessionCommand` fields: `ProjectId`, `RequestedBy`, `Reason`
+  - Softened WebSocket claim to "Phase 2" with honest note about publish-only relay in Phase 1
+  - Clarified WorkingDirectory behavior in appsettings (resolves to repo root at session start)
+- **Validation:** All 92 broker tests pass; Program.cs, appsettings.json, AppHost.cs, and Contracts definitions reviewed.
+- **Commits:** 1bab898 (Link's initial docs), 1d364bf (Neo's accuracy pass).
+- **PR:** #68 (already open, closes #63).
+- **Key learning:** Phase 1 docs must match actual implementation, not planned features. Unimplemented behavior should be explicitly labeled as "Phase 2" or removed. Field names must match contract definitions exactly.
