@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using SquadScout.Broker.Projects;
 using SquadScout.Broker.Pty;
+using SquadScout.Broker.Realtime;
 using SquadScout.Broker.Relay;
 using SquadScout.Broker.Sessions;
 using SquadScout.Broker.Tests.TestDoubles;
@@ -177,6 +178,7 @@ public sealed class SessionRelayPipelineTests
             orchestrator,
             ptyHost,
             new PtySessionEnvelopePump(orchestrator),
+            new NullSessionGroupIngress(),
             new SessionGroupResolver(),
             NullLogger<InMemorySessionRelay>.Instance);
 
@@ -243,6 +245,7 @@ public sealed class SessionRelayPipelineTests
             orchestrator,
             ptyHost,
             new PtySessionEnvelopePump(orchestrator),
+            new NullSessionGroupIngress(),
             new SessionGroupResolver(),
             NullLogger<InMemorySessionRelay>.Instance);
 
@@ -603,6 +606,7 @@ public sealed class SessionRelayPipelineTests
                 Orchestrator,
                 PtyHost,
                 new PtySessionEnvelopePump(Orchestrator),
+                new NullSessionGroupIngress(),
                 SessionGroupResolver,
                 NullLogger<InMemorySessionRelay>.Instance);
     }

@@ -49,6 +49,7 @@ builder.Services.AddSingleton<IProjectCatalog, InMemoryProjectCatalog>();
 builder.Services.AddSingleton<IPtyHost, CopilotPtyHost>();
 builder.Services.AddSingleton<PtySessionEnvelopePump>();
 builder.Services.AddSingleton<ISessionGroupResolver, SessionGroupResolver>();
+builder.Services.AddSingleton<SessionGroupMessageHandler>();
 builder.Services.AddSingleton<IRelayPublisher>(serviceProvider =>
 {
     var options = serviceProvider.GetRequiredService<IOptions<AzureWebPubSubOptions>>().Value;
@@ -62,6 +63,20 @@ builder.Services.AddSingleton<IRelayPublisher>(serviceProvider =>
         groupClient,
         serviceProvider.GetRequiredService<ISessionGroupResolver>(),
         serviceProvider.GetRequiredService<ILogger<AzureWebPubSubRelayPublisher>>());
+});
+builder.Services.AddSingleton<ISessionGroupIngress>(serviceProvider =>
+{
+    var options = serviceProvider.GetRequiredService<IOptions<AzureWebPubSubOptions>>().Value;
+    if (string.IsNullOrWhiteSpace(options.ConnectionString))
+    {
+        return new NullSessionGroupIngress();
+    }
+
+    return new AzureWebPubSubSessionGroupIngress(
+        options,
+        serviceProvider.GetRequiredService<ISessionGroupResolver>(),
+        serviceProvider.GetRequiredService<SessionGroupMessageHandler>(),
+        serviceProvider.GetRequiredService<ILogger<AzureWebPubSubSessionGroupIngress>>());
 });
 builder.Services.AddSingleton<ISessionRelay, InMemorySessionRelay>();
 builder.Services.AddSingleton<ISequenceValidator, SessionSequenceValidator>();

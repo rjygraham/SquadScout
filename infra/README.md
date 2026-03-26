@@ -91,31 +91,14 @@ The Bicep deployment automatically configures required Function app settings. Fo
 {
   "Values": {
     "Functions__WebPubSubEndpoint": "<from WEBPUBSUB_ENDPOINT output>",
-    "Functions__WebPubSubHub": "squadscout",
-    "Functions__BrokerBaseUrl": "http://127.0.0.1:5071"
+    "Functions__WebPubSubHub": "squadscout"
   }
 }
 ```
 
-### Configuring Web PubSub Event Handlers
+### Web PubSub Routing
 
-After infrastructure deployment, configure the Web PubSub hub to route upstream events to the Function:
-
-```bash
-# Get Function App hostname
-FUNCTION_HOST=$(az functionapp show -g rg-<env> -n func-<token> --query defaultHostName -o tsv)
-
-# Configure upstream handler
-az webpubsub hub update \
-  -g rg-<env> \
-  -n wps-<token> \
-  --hub-name squadscout \
-  --event-handler url-template="https://${FUNCTION_HOST}/api/upstream" \
-    user-event-pattern="input" \
-    system-events="connect" "connected" "disconnected"
-```
-
-> **Note:** This step is not automated in Phase 1 Bicep to keep the IaC focused on resource provisioning. Future iterations may include a deployment script.
+No upstream event handler is required for the current Phase 1 topology. Azure Functions only mint/authenticate access tokens, and the broker joins each active session group directly over Azure Web PubSub for operational traffic.
 
 ## Cost Considerations
 

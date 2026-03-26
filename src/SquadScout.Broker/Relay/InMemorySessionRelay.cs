@@ -3,6 +3,7 @@ using System.Threading;
 using Microsoft.Extensions.Logging;
 using SquadScout.Broker.Projects;
 using SquadScout.Broker.Pty;
+using SquadScout.Broker.Realtime;
 using SquadScout.Broker.Sessions;
 using SquadScout.Contracts.Messages;
 using SquadScout.Contracts.Sessions;
@@ -15,6 +16,7 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
     private readonly ISessionOrchestrator _orchestrator;
     private readonly IPtyHost _ptyHost;
     private readonly PtySessionEnvelopePump _ptyPump;
+    private readonly ISessionGroupIngress _sessionGroupIngress;
     private readonly ISessionGroupResolver _sessionGroupResolver;
     private readonly ILogger<InMemorySessionRelay> _logger;
     private readonly ConcurrentDictionary<string, ActiveRelaySession> _activeSessions = new(StringComparer.OrdinalIgnoreCase);
@@ -25,6 +27,7 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
         ISessionOrchestrator orchestrator,
         IPtyHost ptyHost,
         PtySessionEnvelopePump ptyPump,
+        ISessionGroupIngress sessionGroupIngress,
         ISessionGroupResolver sessionGroupResolver,
         ILogger<InMemorySessionRelay> logger)
     {
@@ -32,6 +35,7 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _ptyHost = ptyHost ?? throw new ArgumentNullException(nameof(ptyHost));
         _ptyPump = ptyPump ?? throw new ArgumentNullException(nameof(ptyPump));
+        _sessionGroupIngress = sessionGroupIngress ?? throw new ArgumentNullException(nameof(sessionGroupIngress));
         _sessionGroupResolver = sessionGroupResolver ?? throw new ArgumentNullException(nameof(sessionGroupResolver));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -44,6 +48,7 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
         var project = await GetRequiredProjectAsync(command.ProjectId, cancellationToken).ConfigureAwait(false);
         var session = await _orchestrator.StartAsync(command, cancellationToken).ConfigureAwait(false);
         IPtySession? ptySession = null;
+        ActiveRelaySession? activeSession = null;
 
         try
         {
@@ -58,17 +63,24 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
                 return session with { State = SessionState.Stopped };
             }
 
-            var activeSession = new ActiveRelaySession(ptySession);
+            activeSession = new ActiveRelaySession(ptySession);
             if (!_activeSessions.TryAdd(session.SessionId, activeSession))
             {
                 throw new InvalidOperationException($"An active PTY session already exists for session '{session.SessionId}'.");
             }
 
             activeSession.PumpTask = RunPumpLoopAsync(session.SessionId, activeSession);
+            await _sessionGroupIngress.StartAsync(session, CancellationToken.None).ConfigureAwait(false);
             return session with { State = SessionState.Running };
         }
         catch (OperationCanceledException)
         {
+            if (activeSession is not null)
+            {
+                _activeSessions.TryRemove(session.SessionId, out _);
+                activeSession.Dispose();
+            }
+
             if (ptySession is not null)
             {
                 await SafeDisposeAsync(ptySession).ConfigureAwait(false);
@@ -79,6 +91,12 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
         }
         catch
         {
+            if (activeSession is not null)
+            {
+                _activeSessions.TryRemove(session.SessionId, out _);
+                activeSession.Dispose();
+            }
+
             if (ptySession is not null)
             {
                 await SafeDisposeAsync(ptySession).ConfigureAwait(false);
@@ -410,6 +428,15 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
         finally
         {
             _activeSessions.TryRemove(sessionId, out _);
+            try
+            {
+                await _sessionGroupIngress.StopAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to stop session group ingress for session {SessionId}.", sessionId);
+            }
+
             await SafeDisposeAsync(activeSession.PtySession).ConfigureAwait(false);
             activeSession.Dispose();
         }

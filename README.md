@@ -91,7 +91,7 @@ GET /api/projects                 # List projects (local admin/internal API)
 POST /api/sessions                # Start session (local admin/internal API)
 GET /api/sessions/{sessionId}     # Get session status (local admin/internal API)
 POST /api/sessions/{sessionId}/stop   # Stop session (local admin/internal API)
-POST /api/sessions/{sessionId}/input  # Current upstream bridge for live input
+POST /api/sessions/{sessionId}/input  # Admin/internal fallback for direct client envelopes
 GET /api/sessions/{sessionId}/telemetry  # Get session diagnostics (Phase 1)
 ```
 
@@ -117,7 +117,8 @@ See [Broker Setup](./docs/BROKER_SETUP.md) for full configuration reference.
 - **Broker Host:** Local HTTP server exposing admin/internal APIs.
 - **PTY Host:** Windows ConPTY wrapper for Copilot process lifecycle.
 - **Session Orchestration:** In-memory session state and message routing.
-- **Relay Integration:** Azure Web PubSub is the mobile transport. This branch moves project list, session start, and session status onto a broker control channel over Web PubSub; live session input still uses the current upstream bridge pending the remaining direct session-routing work.
+- **Relay Integration:** Azure Web PubSub carries both broker control requests and live session traffic. The broker now joins each active session group directly so mobile input and replay requests flow over Web PubSub without an Azure Functions upstream bridge.
+- **Functions:** Azure Functions are limited to negotiate/auth/token-minting responsibilities for Web PubSub connections.
 - **Orleans (Phase 2):** Grain-based state distribution (currently disabled).
 
 ## Known Limitations (Phase 1)

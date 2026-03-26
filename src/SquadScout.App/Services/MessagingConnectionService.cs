@@ -761,7 +761,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         bool requireConnectedStatus,
         CancellationToken cancellationToken)
     {
-        var (session, socket) = GetTransportForSend(requireConnectedStatus);
+        var (session, socket, sessionGroup) = GetTransportForSend(requireConnectedStatus);
         EnsureEnvelopeTargetsSession(envelope, session);
 
         if (envelope.Direction != MessageDirection.ClientToBroker)
@@ -772,12 +772,13 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         var ackId = Interlocked.Increment(ref _nextAckId);
         await SendCommandExpectAckAsync(
                 socket,
-                new WebPubSubSendEventCommand
+                new WebPubSubSendToGroupCommand
                 {
-                    Event = ResolveUpstreamEventName(envelope.MessageType),
+                    Group = sessionGroup,
                     DataType = "json",
                     Data = JsonSerializer.SerializeToElement(envelope, SessionMessageSerializer.DefaultOptions),
-                    AckId = ackId
+                    AckId = ackId,
+                    NoEcho = true
                 },
                 ackId,
                 "send session envelope",
@@ -857,7 +858,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         receiveLoopCts?.Dispose();
     }
 
-    private (SessionDescriptor Session, IWebPubSubSocket Socket) GetTransportForSend(bool requireConnectedStatus)
+    private (SessionDescriptor Session, IWebPubSubSocket Socket, string SessionGroup) GetTransportForSend(bool requireConnectedStatus)
     {
         lock (_stateSync)
         {
@@ -867,7 +868,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 throw new InvalidOperationException("Live messaging is not connected. Use Retry live transport to reconnect before sending.");
             }
 
-            return (_activeSession, _socket);
+            return (_activeSession, _socket, _negotiation.SessionGroup);
         }
     }
 
@@ -1154,16 +1155,6 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         };
     }
 
-    private static string ResolveUpstreamEventName(SessionMessageType messageType) =>
-        messageType switch
-        {
-            SessionMessageType.Input or SessionMessageType.ReplayRequest => SessionUpstreamEventNames.Input,
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(messageType),
-                messageType,
-                "No Azure Web PubSub upstream event is defined for this session message type.")
-        };
-
     private static string ComposeFailureReason(string? prefix, string detail) =>
         string.IsNullOrWhiteSpace(prefix)
             ? detail
@@ -1200,17 +1191,19 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         public long AckId { get; init; }
     }
 
-    private sealed record WebPubSubSendEventCommand
+    private sealed record WebPubSubSendToGroupCommand
     {
-        public string Type { get; init; } = "event";
+        public string Type { get; init; } = "sendToGroup";
 
-        public string Event { get; init; } = string.Empty;
+        public string Group { get; init; } = string.Empty;
 
         public string DataType { get; init; } = "json";
 
         public JsonElement Data { get; init; }
 
         public long AckId { get; init; }
+
+        public bool NoEcho { get; init; }
     }
 
     private sealed record WebPubSubAckMessage

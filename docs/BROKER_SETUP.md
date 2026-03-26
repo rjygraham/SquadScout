@@ -207,15 +207,16 @@ See `src/SquadScout.Broker/Program.cs` for endpoint definitions.
 - **Send Input:** `POST /api/sessions/{sessionId}/input`
   - Request body: `MessageEnvelope<InputChunkPayload>` with sequence metadata
   - Returns: Sequence validation result (Accepted/Duplicate/GapDetected/Conflict)
+  - Notes: This remains available for admin/internal tooling. The mobile app now sends live input and replay requests directly to the negotiated Azure Web PubSub session group.
   
 - **Get Session Telemetry:** `GET /api/sessions/{sessionId}/telemetry`
   - Returns: Diagnostic snapshot including sequence state and message buffer (Phase 1)
 
-See `src/SquadScout.Broker/Program.cs` for endpoint implementations. Project list, session start, and session status requests from the mobile app now use the Web PubSub broker control channel; live input still uses the current upstream bridge until the remaining direct session-routing work lands.
+See `src/SquadScout.Broker/Program.cs` for endpoint implementations. Project list, session start, session status, live input, and replay requests from the mobile app now flow over Azure Web PubSub; the HTTP APIs remain for admin/internal use and focused testing.
 
 ### WebSocket Support (Phase 2)
 
-**Phase 1 Status:** No broker-owned HTTP WebSocket endpoints are implemented. This branch moves mobile broker control requests (project list, session start, session status) onto Azure Web PubSub. Live session input still uses the current upstream bridge while the remaining direct session-routing work is completed.
+**Phase 1 Status:** No broker-owned HTTP WebSocket endpoints are implemented. The broker instead joins Azure Web PubSub session groups directly: project list, session start, session status, live input, and replay requests all flow over Web PubSub, while Functions only negotiate/authenticate those connections.
 
 ## Project Registration
 
