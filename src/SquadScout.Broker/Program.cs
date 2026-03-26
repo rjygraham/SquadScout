@@ -86,10 +86,12 @@ else
 }
 
 builder.Services.AddSingleton(orleansStatus);
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<InMemoryProjectCatalog>();
 builder.Services.AddSingleton<IPtyHost, CopilotPtyHost>();
 builder.Services.AddSingleton<PtySessionEnvelopePump>();
 builder.Services.AddSingleton<ISessionGroupResolver, SessionGroupResolver>();
+builder.Services.AddSingleton<ISessionLivenessManager, SessionLivenessManager>();
 builder.Services.AddSingleton<IRelayPublisher>(serviceProvider =>
 {
     var options = serviceProvider.GetRequiredService<IOptions<AzureWebPubSubOptions>>().Value;

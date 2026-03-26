@@ -11,6 +11,7 @@ namespace SquadScout.Broker.Relay;
 
 public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
 {
+    private readonly ISessionLivenessManager _livenessManager;
     private readonly IProjectCatalog _projectCatalog;
     private readonly ISessionOrchestrator _orchestrator;
     private readonly IPtyHost _ptyHost;
@@ -25,6 +26,7 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
         ISessionOrchestrator orchestrator,
         IPtyHost ptyHost,
         PtySessionEnvelopePump ptyPump,
+        ISessionLivenessManager livenessManager,
         ISessionGroupResolver sessionGroupResolver,
         ILogger<InMemorySessionRelay> logger)
     {
@@ -32,6 +34,7 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _ptyHost = ptyHost ?? throw new ArgumentNullException(nameof(ptyHost));
         _ptyPump = ptyPump ?? throw new ArgumentNullException(nameof(ptyPump));
+        _livenessManager = livenessManager ?? throw new ArgumentNullException(nameof(livenessManager));
         _sessionGroupResolver = sessionGroupResolver ?? throw new ArgumentNullException(nameof(sessionGroupResolver));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -64,6 +67,8 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
                 throw new InvalidOperationException($"An active PTY session already exists for session '{session.SessionId}'.");
             }
 
+            _livenessManager.RegisterSession(session.SessionId);
+            activeSession.HeartbeatTask = RunHeartbeatLoopAsync(session.SessionId, activeSession);
             activeSession.PumpTask = RunPumpLoopAsync(session.SessionId, activeSession);
             return session with { State = SessionState.Running };
         }
@@ -118,6 +123,7 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
                     session.State,
                     $"Session '{session.SessionId}' is already stopping for project '{session.ProjectId}'.");
             }
+
         }
         finally
         {
@@ -184,7 +190,7 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
                     $"Session '{sessionId}' is stopping and no longer accepts input.");
             }
 
-            return await _orchestrator.AcceptClientMessageAsync(
+            var validation = await _orchestrator.AcceptClientMessageAsync(
                 sessionId,
                 envelope,
                 async (acceptedEnvelope, token) =>
@@ -198,6 +204,13 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
                     await activeSession.PtySession.WriteAsync(acceptedEnvelope.Payload.Content, token).ConfigureAwait(false);
                 },
                 cancellationToken).ConfigureAwait(false);
+
+            if (validation.IsAccepted)
+            {
+                _livenessManager.RecordClientActivity(sessionId);
+            }
+
+            return validation;
         }
         finally
         {
@@ -215,6 +228,7 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
             try
             {
                 await activeSession.PtySession.TerminateAsync().ConfigureAwait(false);
+                activeSession.CancelBackgroundWork();
                 await activeSession.PumpTask.ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -409,9 +423,71 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
         }
         finally
         {
+            _livenessManager.UnregisterSession(sessionId);
+            activeSession.CancelBackgroundWork();
             _activeSessions.TryRemove(sessionId, out _);
+            try
+            {
+                await activeSession.HeartbeatTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Heartbeat loop finished with a non-fatal error for session {SessionId}.", sessionId);
+            }
+
             await SafeDisposeAsync(activeSession.PtySession).ConfigureAwait(false);
             activeSession.Dispose();
+        }
+    }
+
+    private async Task RunHeartbeatLoopAsync(string sessionId, ActiveRelaySession activeSession)
+    {
+        try
+        {
+            while (!activeSession.LifetimeToken.IsCancellationRequested)
+            {
+                await Task.Delay(_livenessManager.HeartbeatInterval, activeSession.LifetimeToken).ConfigureAwait(false);
+
+                if (_livenessManager.HasTimedOut(sessionId))
+                {
+                    _logger.LogWarning(
+                        "Session {SessionId} exceeded the client liveness timeout after {TimeoutSeconds} seconds without accepted activity. Terminating the PTY session.",
+                        sessionId,
+                        _livenessManager.LivenessTimeout.TotalSeconds);
+
+                    activeSession.TryBeginStop();
+                    activeSession.CancelBackgroundWork();
+                    try
+                    {
+                        await activeSession.PtySession.TerminateAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "PTY termination failed after client liveness timeout for session {SessionId}.", sessionId);
+                    }
+
+                    return;
+                }
+
+                await _orchestrator.RecordBrokerMessageAsync(
+                        sessionId,
+                        new BrokerEnvelopeCommand<HeartbeatPayload>
+                        {
+                            MessageType = SessionMessageType.Heartbeat,
+                            MessageId = $"heartbeat-{sessionId}-{Interlocked.Increment(ref _nextMessageId)}",
+                            CorrelationId = $"pty-session:{sessionId}",
+                            TimestampUtc = DateTimeOffset.UtcNow,
+                            Payload = _livenessManager.IssueHeartbeat(sessionId)
+                        },
+                        activeSession.LifetimeToken)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (activeSession.LifetimeToken.IsCancellationRequested)
+        {
         }
     }
 
@@ -482,13 +558,25 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
 
         public Task PumpTask { get; set; } = Task.CompletedTask;
 
+        public Task HeartbeatTask { get; set; } = Task.CompletedTask;
+
         public SemaphoreSlim StopInputGate { get; } = new(1, 1);
+
+        public CancellationToken LifetimeToken => _lifetimeCts.Token;
 
         public bool IsStopRequested => Volatile.Read(ref _stopRequested) == 1;
 
         public bool TryBeginStop() => Interlocked.CompareExchange(ref _stopRequested, 1, 0) == 0;
 
         public void ResetStopRequest() => Interlocked.Exchange(ref _stopRequested, 0);
+
+        public void CancelBackgroundWork()
+        {
+            if (!_lifetimeCts.IsCancellationRequested)
+            {
+                _lifetimeCts.Cancel();
+            }
+        }
 
         public void Dispose()
         {
@@ -497,7 +585,11 @@ public sealed class InMemorySessionRelay : ISessionRelay, IAsyncDisposable
                 return;
             }
 
+            CancelBackgroundWork();
+            _lifetimeCts.Dispose();
             StopInputGate.Dispose();
         }
+
+        private readonly CancellationTokenSource _lifetimeCts = new();
     }
 }

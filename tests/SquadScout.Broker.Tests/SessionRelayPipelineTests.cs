@@ -177,6 +177,7 @@ public sealed class SessionRelayPipelineTests
             orchestrator,
             ptyHost,
             new PtySessionEnvelopePump(orchestrator),
+            CreateLivenessManager(),
             new SessionGroupResolver(),
             NullLogger<InMemorySessionRelay>.Instance);
 
@@ -243,6 +244,7 @@ public sealed class SessionRelayPipelineTests
             orchestrator,
             ptyHost,
             new PtySessionEnvelopePump(orchestrator),
+            CreateLivenessManager(),
             new SessionGroupResolver(),
             NullLogger<InMemorySessionRelay>.Instance);
 
@@ -484,7 +486,7 @@ public sealed class SessionRelayPipelineTests
         var relayPublisher = new RecordingRelayPublisher();
         var orchestrator = new InMemorySessionOrchestrator(relayPublisher, new SessionSequenceValidator(), replayBufferCapacity: 8);
         var ptyHost = new MockPtyHost();
-        return new RelayHarness(catalog, relayPublisher, orchestrator, ptyHost, new RecordingSessionGroupResolver());
+        return new RelayHarness(catalog, relayPublisher, orchestrator, ptyHost, new RecordingSessionGroupResolver(), CreateLivenessManager());
     }
 
     private static Task<RelayHarness> CreateHarnessWithoutProjectsAsync()
@@ -493,7 +495,7 @@ public sealed class SessionRelayPipelineTests
         var relayPublisher = new RecordingRelayPublisher();
         var orchestrator = new InMemorySessionOrchestrator(relayPublisher, new SessionSequenceValidator(), replayBufferCapacity: 8);
         var ptyHost = new MockPtyHost();
-        return Task.FromResult(new RelayHarness(catalog, relayPublisher, orchestrator, ptyHost, new RecordingSessionGroupResolver()));
+        return Task.FromResult(new RelayHarness(catalog, relayPublisher, orchestrator, ptyHost, new RecordingSessionGroupResolver(), CreateLivenessManager()));
     }
 
     private static string GetRepositoryRoot()
@@ -502,6 +504,15 @@ public sealed class SessionRelayPipelineTests
         Directory.CreateDirectory(root);
         return root;
     }
+
+    private static SessionLivenessManager CreateLivenessManager(
+        TimeSpan? heartbeatInterval = null,
+        TimeSpan? livenessTimeout = null) =>
+        new(
+            TimeProvider.System,
+            heartbeatInterval,
+            livenessTimeout,
+            senderInstanceId: "broker-tests");
 
     private static MessageEnvelope<InputChunkPayload> CreateInputEnvelope(
         SessionDescriptor session,
@@ -585,13 +596,15 @@ public sealed class SessionRelayPipelineTests
             RecordingRelayPublisher relayPublisher,
             InMemorySessionOrchestrator orchestrator,
             MockPtyHost ptyHost,
-            RecordingSessionGroupResolver sessionGroupResolver)
+            RecordingSessionGroupResolver sessionGroupResolver,
+            SessionLivenessManager livenessManager)
         {
             ProjectCatalog = projectCatalog;
             RelayPublisher = relayPublisher;
             Orchestrator = orchestrator;
             PtyHost = ptyHost;
             SessionGroupResolver = sessionGroupResolver;
+            LivenessManager = livenessManager;
         }
 
         public InMemoryProjectCatalog ProjectCatalog { get; }
@@ -604,12 +617,15 @@ public sealed class SessionRelayPipelineTests
 
         public RecordingSessionGroupResolver SessionGroupResolver { get; }
 
+        public SessionLivenessManager LivenessManager { get; }
+
         public InMemorySessionRelay CreateRelay() =>
             new(
                 ProjectCatalog,
                 Orchestrator,
                 PtyHost,
                 new PtySessionEnvelopePump(Orchestrator),
+                LivenessManager,
                 SessionGroupResolver,
                 NullLogger<InMemorySessionRelay>.Instance);
     }

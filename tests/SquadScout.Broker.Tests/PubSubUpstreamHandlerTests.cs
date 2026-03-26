@@ -66,6 +66,39 @@ public sealed class PubSubUpstreamHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsyncForHeartbeatEventRequiresCurrentBrokerNonce()
+    {
+        var orchestrator = new RecordingSessionOrchestrator();
+        var livenessManager = new SessionLivenessManager(TimeProvider.System, senderInstanceId: "broker-tests");
+        livenessManager.RegisterSession("session-abc");
+        var brokerHeartbeat = livenessManager.IssueHeartbeat("session-abc");
+        var handler = CreateHandler(orchestrator: orchestrator, livenessManager: livenessManager);
+        using var body = CreateJsonBody(CreateHeartbeatEnvelope(acknowledgedNonce: brokerHeartbeat.Nonce!));
+        var headers = CreateSignedHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Heartbeat}");
+
+        var response = await handler.HandleAsync("POST", headers, body, CancellationToken.None);
+
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, response.StatusCode);
+        Assert.NotNull(orchestrator.LastHeartbeatEnvelope);
+        Assert.False(livenessManager.CanAcceptHeartbeat("session-abc", CreateHeartbeatEnvelope(acknowledgedNonce: brokerHeartbeat.Nonce!).Payload, out _));
+    }
+
+    [Fact]
+    public async Task HandleAsyncForHeartbeatEventRejectsUnknownNonce()
+    {
+        var livenessManager = new SessionLivenessManager(TimeProvider.System, senderInstanceId: "broker-tests");
+        livenessManager.RegisterSession("session-abc");
+        var handler = CreateHandler(livenessManager: livenessManager);
+        using var body = CreateJsonBody(CreateHeartbeatEnvelope(acknowledgedNonce: "unknown-nonce"));
+        var headers = CreateSignedHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Heartbeat}");
+
+        var response = await handler.HandleAsync("POST", headers, body, CancellationToken.None);
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("nonce", response.Body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task HandleAsyncRejectsMalformedInputEnvelopeWithoutCallingRelay()
     {
         var relay = new RecordingSessionRelay();
@@ -90,7 +123,7 @@ public sealed class PubSubUpstreamHandlerTests
             CancellationToken.None);
 
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("input or replay-request envelope", response.Body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("heartbeat, input, or replay-request envelope", response.Body, StringComparison.OrdinalIgnoreCase);
         Assert.Null(relay.LastInputEnvelope);
     }
 
@@ -270,6 +303,7 @@ public sealed class PubSubUpstreamHandlerTests
         RecordingSessionRelay? relay = null,
         RecordingSessionOrchestrator? orchestrator = null,
         RecordingRelayPublisher? publisher = null,
+        ISessionLivenessManager? livenessManager = null,
         AzureWebPubSubOptions? options = null) =>
         new(
             new WebPubSubUpstreamAuthenticator(
@@ -277,6 +311,7 @@ public sealed class PubSubUpstreamHandlerTests
                 NullLogger<WebPubSubUpstreamAuthenticator>.Instance),
             relay ?? new RecordingSessionRelay(),
             orchestrator ?? new RecordingSessionOrchestrator(),
+            livenessManager ?? new SessionLivenessManager(TimeProvider.System, senderInstanceId: "broker-tests"),
             publisher ?? new RecordingRelayPublisher(),
             NullLogger<WebPubSubUpstreamHandler>.Instance);
 
@@ -321,6 +356,26 @@ public sealed class PubSubUpstreamHandlerTests
             Payload = new InputChunkPayload
             {
                 Content = "status --json\n"
+            }
+        };
+
+    private static MessageEnvelope<HeartbeatPayload> CreateHeartbeatEnvelope(
+        long clientSequence = 1,
+        string acknowledgedNonce = "nonce-1") =>
+        new()
+        {
+            ProjectId = "broker",
+            SessionId = "session-abc",
+            Generation = SessionEnvelopeContract.InitialGeneration,
+            MessageType = SessionMessageType.Heartbeat,
+            Direction = MessageDirection.ClientToBroker,
+            ClientSequence = clientSequence,
+            MessageId = $"client-heartbeat-{clientSequence}",
+            CorrelationId = "corr-heartbeat",
+            Payload = new HeartbeatPayload
+            {
+                SenderInstanceId = "mobile-tests",
+                AcknowledgedNonce = acknowledgedNonce
             }
         };
 
@@ -450,6 +505,15 @@ public sealed class PubSubUpstreamHandlerTests
 
     private sealed class RecordingSessionOrchestrator : ISessionOrchestrator
     {
+        public SequenceValidationResult ValidationResult { get; set; } = new()
+        {
+            Status = SequenceValidationStatus.Accepted,
+            Generation = SessionEnvelopeContract.InitialGeneration,
+            ClientSequence = 1
+        };
+
+        public MessageEnvelope<HeartbeatPayload>? LastHeartbeatEnvelope { get; private set; }
+
         public MessageEnvelope<ReplayRequestPayload>? LastReplayRequest { get; private set; }
 
         public MessageEnvelope<ReplayResponsePayload> ReplayResponse { get; set; } = new()
@@ -482,8 +546,15 @@ public sealed class PubSubUpstreamHandlerTests
         public Task<SequenceValidationResult> ValidateClientMessageAsync<TPayload>(
             string sessionId,
             MessageEnvelope<TPayload> envelope,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            CancellationToken cancellationToken = default)
+        {
+            if (envelope is MessageEnvelope<HeartbeatPayload> heartbeat)
+            {
+                LastHeartbeatEnvelope = heartbeat;
+            }
+
+            return Task.FromResult(ValidationResult);
+        }
 
         public Task<SequenceValidationResult> AcceptClientMessageAsync<TPayload>(
             string sessionId,
