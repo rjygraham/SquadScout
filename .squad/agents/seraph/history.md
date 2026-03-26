@@ -112,3 +112,25 @@ MAUI App Shell complete (cross-platform, chat UI, 36 tests passing). PR #43 in r
 - **Targeted cloud diagnostics improved:** upstream auth failures and broker-forwarding failures now log `projectId`, `sessionId`, derived `sessionGroup`, `messageId`, and `ce-connectionId`, while `src\SquadScout.Functions\NegotiateFunction.cs` logs the concrete negotiate auth rejection status/message instead of a generic boundary warning.
 - **Explicit cloud assumption recorded:** Phase 1 upstream input still assumes the base session group only; broker-affinity ingress will require a future envelope or route contract that carries `brokerId` before Functions can validate broker-scoped groups end to end.
 - **Regression proof extended:** `tests\SquadScout.Broker.Tests\PubSubUpstreamHandlerTests.cs` now covers rejection of envelopes that cannot map to a legal Phase 1 session group, giving the datapath gate a repeatable cloud-side failure case.
+
+### 2026-03-25: Phase 1 Cost Optimization Analysis Complete (Orchestration Log)
+
+**Status:** Issue #58 created for Phase 1 backlog.
+
+- **Analysis:** Comprehensive cost-impact and risk assessment for Web PubSub outbound message optimization
+- **Backward Compatibility:** Dual-format deserialization designed in from start
+- **ROI:** High for production (15% billing savings); medium for Phase 1 local dev
+- **Staged Rollout:** Numeric enums → Unix timestamps → base64 GUIDs minimizes risk
+- **Key Learning:** Three safe optimization levers exist; backward compatibility preserves client flexibility
+
+**Next:** Seraph can begin Issue #58 implementation with staged approach.
+
+### Issue #63 — Final Accuracy Corrections for Broker Documentation (2026-03-26)
+
+- **Validation baseline:** Commit 1d364bf already contained the required corrections before final-pass request.
+- **Mismatches corrected (previously):** Removed "WebSocket APIs" claim from BROKER_SETUP.md Overview (Phase 1 has REST only), changed all project registration examples from `workingDirectory` to `repositoryRoot` (matching RegisteredProject contract), fixed StartSessionCommand and StopSessionCommand field descriptions to match actual contract properties.
+- **Files corrected:** docs/BROKER_SETUP.md (Overview, Session APIs, Project Registration, example curl commands), docs/QUICK_START.md (project registration example).
+- **Validation:** `dotnet build .\SquadScout.slnx -nologo` passed (exit 0), no behavioral changes to validate.
+- **Commit:** 1d364bf "Fix API contract field names and remove WebSocket claim (#63)" already pushed to origin/squad/63-document-local-broker-config-run-flow.
+- **PR #68:** Already open with "closes #63" in body, ready for review/merge.
+- **Outcome:** Documentation now concrete, contributor-facing, and aligned to current Phase 1 implementation.

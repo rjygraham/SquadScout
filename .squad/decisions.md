@@ -2,6 +2,9 @@
 
 ## 2026-03-25
 
+- **2026-03-25T21:51:34Z: Switch — PR #57 Approval (Comprehensive Review).** Approved for merge after failure-mode coverage audit. All 6 critical failure modes explicitly tested (replay overflow, secret leakage, gap detection, generation reset, client forward, heartbeat pollution). Build clean (0 warnings), full regression 126/126 passing. Secret-safe export validated end-to-end. Phase 1 gate datapath proven with integration tests. No blocking concerns.
+- **2026-03-25T21:51:34Z: Morpheus — PR #57 Approval (Security & Performance).** Approved for merge. Secret-safety baseline extended with `SecretRedactor.Redact(JsonElement)` scanning property names and values. Trust boundaries preserved; upstream auth tests 14/14 passing. Replay semantics unchanged; reconnect invariants maintained. Non-blocking advisory: telemetry export creates full snapshot on each request (acceptable for Phase 1 manual diagnostics; defer rate-limiting to Phase 4 if polling becomes automated).
+- **2026-03-25T21:51:34Z: Ralph — PR #57 Merged (Commit 57ebc0a).** Squash merged to main with message "feat: implement session telemetry and replay diagnostics"; includes Closes #17 and Co-authored-by trailer. Feature branch `feature/issue-17-session-telemetry-diagnostics` deleted locally and on origin. Issue #17 closed. All 126 tests pass; mergeable_state clean.
 - **2026-03-25T17:26:59Z: User directive.** By Ryan Graham (via Copilot). Use `D:\GitHub\SquadScout` as the main working location; `origin/main` is already pulled and up to date. Captured for team memory.
 - **2026-03-25: Switch — Issue #15 acceptance decision.** Issue #15 acceptance should be enforced primarily at the view-model seam, not in shell scaffolding tests. New acceptance bar lives in focused tests for `ProjectSelectionViewModel` and `ActiveSessionViewModel`, while `MobileShellScaffoldTests.cs` stays untouched. Trinity can keep working in parallel without test conflicts.
 - **2026-03-25: Trinity — Issue #15 UX polish decision.** Treat the MAUI flow as a strict single-session handoff. If a session is already in focus, projects page must show resume-first affordances and warnings instead of letting "Start session" silently resume or replace the existing session. Silent reuse made project switching ambiguous. `ProjectSelectionPage`, `ProjectSelectionViewModel`, `ActiveSessionPage` surface loading/empty/stale-selection/retry states locally and clarify that returning to projects is non-destructive. Reconnect/voice work should preserve this resume-first handoff model.
@@ -847,3 +850,78 @@ All six state categories are coherently handled:
 ### Decision
 
 **APPROVE merge.** The PR satisfies Issue #15's requirements, aligns with all accepted user directives, introduces no regressions, and the architecture is clean for future reconnect/voice extensions.
+
+## 2026-03-25 (Continued)
+
+### Phase 1 Cost Optimization: Web PubSub Outbound Message Size Reduction
+
+**Decision Date:** 2026-03-25  
+**Owner:** Seraph  
+**Related Issue:** #58 (Phase 1: Optimize Web PubSub outbound message contract for cost reduction)
+
+**Context:** User request to add Phase 1 backlog item for reducing Web PubSub outbound message costs via contract minimization. Azure Web PubSub bills by quantity of messages sent outbound; reducing message size = lower costs for same message volume.
+
+**Analysis:**
+- Current envelope: 13 fields + typed payload
+- Enums serialize as strings (e.g., "heartbeat" vs numeric 5)
+- GUIDs use full 36-character RFC4122 format
+- Timestamps use RFC3339 format (25 characters)
+- Overhead contributors: field names (50-65%), GUIDs (15-20%), timestamps (5-8%), enums (2-5%)
+
+**Proposed Phase 1 Approach: Incremental Minimization**
+
+Three safe levers (ranked by ROI):
+1. **Numeric Enum Serialization** (2-5% reduction): "heartbeat" → 5 (~15-30 bytes/message)
+2. **GUID Base64 Compression** (7-12% reduction): 36 chars → 22 chars (~42 bytes/message)
+3. **Unix Timestamp Format** (2-3% reduction): RFC3339 → milliseconds (~12 bytes/message)
+
+**Combined Impact:** 11-20% message size reduction
+
+**Backward Compatibility:** Preserved via dual-format deserialization
+
+**Decision:** APPROVED for Phase 1 with staged rollout. Low to medium risk when staged properly. Issue #58 created.
+
+---
+
+### Phase 1 WorkingDirectory Clarification: CopilotPtyHostOptions Behavior
+
+**Decision Date:** 2026-03-25  
+**Owner:** Link  
+**Related Issue:** #59 (Phase 1: Clarify CopilotPtyHostOptions.WorkingDirectory semantics and logging)
+
+**Context:** Assessment revealed functionality already exists and works correctly. Remaining work is observability only.
+
+**Gap Analysis:**
+1. Enhance logging in CopilotPtyHost.ResolveWorkingDirectory to show which source was used
+2. Add XML documentation on CopilotPtyHostOptions.WorkingDirectory clarifying fallback semantics
+3. Add appsettings.json comments explaining per-project behavior
+
+**Effort Estimate:** XS (1-2 hours) — documentation and logging enhancement only; no behavioral changes.
+
+**Decision:** APPROVED as low-priority Phase 1 clarification issue. Honest framing: functionality exists; work is observability/maintainability improvement only. Issue #59 created.
+
+---
+
+### Phase 1 Backlog Alignment: GitHub Issues #58 and #59 Created
+
+**Decision Date:** 2026-03-25  
+**Owner:** Neo  
+**Related Issues:** #58 (implementation), #59 (clarification)
+
+**Summary:** Two GitHub issues created to align Phase 1 backlog with user request:
+- Issue #58: Implementation (message cost optimization)
+- Issue #59: Clarification (working directory observability)
+
+**Compliance:**
+- ✅ All new work has GitHub issues
+- ✅ No duplicate issues created for already-existing functionality
+- ✅ Honest issue framing sets correct implementer expectations
+- ✅ Squad routing labels applied to both issues
+- ✅ Phase alignment documented
+
+**Key Learnings:**
+1. Distinguish implementation from clarification to avoid false duplication
+2. Backward-compatible optimizations belong in Phase 1 when staged properly
+3. Document findings honestly to set correct expectations
+
+**Decision:** Phase 1 backlog additions documented and tracked. No cross-cutting dependencies identified.

@@ -159,6 +159,36 @@
 
 - **Rebase checkpoint:** PR #48 / issue #11 is now merged on `main`, and `squad/14-pubsub-session-routing-group-membership` was rebased cleanly onto that state.
 - **Original blocker removed:** `src\SquadScout.App\Services\MessagingConnectionService.cs` is no longer the old ready-state stub; it now negotiates and connects to Azure Web PubSub, so MAUI-side session-group join logic is present.
+
+### Issue #63 — Local Broker Documentation (2026-03-25)
+
+**Mission:** Add contributor-facing documentation for local broker configuration and run flow. Cover standalone vs AppHost modes, all config sections, endpoints, project registration, troubleshooting, and Phase 1 limitations.
+
+**Decision:** Three-tier documentation structure:
+1. **README.md** (root): Project overview, quick links, API summary, Phase 1 architecture snapshot.
+2. **docs/QUICK_START.md**: 30-second setup, first-steps checklist, quick-fix troubleshooting, full guide link.
+3. **docs/BROKER_SETUP.md**: Full config reference (Broker, CopilotPty, AzureWebPubSub sections + tables), modes, endpoints, project registration workflow, dev workflow, comprehensive troubleshooting, known limitations.
+
+**Documentation Principles:**
+- Concrete, not aspirational: All examples reflect actual Phase 1 code (appsettings.json keys, defaults, limitations).
+- Discoverable: README → QUICK_START → BROKER_SETUP navigation chain.
+- Contributor-focused: Local dev emphasis; no production/auth/scaling scope creep.
+- Structured tables: Config settings in tabular format for quick scanning.
+- Standalone-first: Broker-only setup before AppHost complexity.
+- Transparent: Phase 1 constraints explicitly listed (in-memory registry, single session, Windows ConPTY only, Orleans disabled, no graceful shutdown).
+
+**Files Created:**
+- `README.md` (105 lines): Project overview + quick links.
+- `docs/BROKER_SETUP.md` (291 lines): Full configuration reference.
+- `docs/QUICK_START.md` (47 lines): Rapid onboarding.
+
+**Commit:** `03407a1` on branch `squad/63-document-local-broker-config-run-flow`.
+
+**Validation:** All files created, tracked in git, pushed to remote. Documentation-only changes; no code logic modified. Internal links verified; all referenced files present.
+
+**Impact:** Contributors can independently set up, configure, and troubleshoot the broker. New team members have clear entry point. Configuration options fully documented. Phase 1 scope explicitly bounded.
+
+**Next:** PR to main after review. Decision record filed to `.squad/decisions/inbox/link-issue-63-docs.md`.
 - **Remaining blocker made explicit:** Client input now goes out as `WebPubSubSendToGroupCommand`, but `src\SquadScout.Functions` still only exposes `NegotiateFunction` and the broker still only ingests live input via `POST /api/sessions/{sessionId}/input`. There is no inbound Web PubSub event/upstream handler forwarding group messages back into the broker.
 - **Validation still green:** `dotnet test .\SquadScout.slnx -nologo --no-build --logger "console;verbosity=minimal"` passes with 76/76 tests (8 app, 68 broker), so the remaining problem is end-to-end routing completeness rather than a current unit-test failure.
 - **Decision:** Do not open the #14 PR until the inbound command-ingress seam is implemented or the team explicitly narrows #14’s scope.
@@ -201,3 +231,14 @@
 - **Cross-team alignment:** Neo (landing execution), Switch (acceptance gate), Morpheus (hardening review), Scribe (decision consolidation). All validation greens converged.
 - **Session log:** 2026-03-25T21-41-50Z-issue-17-landing.md. Orchestration: 2026-03-25T21-41-50Z-switch.md (gate), 2026-03-25T21-41-50Z-neo.md (execution). Decision inbox merged and cleared. Ready for Phase 2 handoff.
 
+
+### 2026-03-25: Phase 1 WorkingDirectory Analysis Complete (Orchestration Log)
+
+**Status:** Issue #59 created as low-priority clarification item.
+
+- **Finding:** Core functionality already implemented correctly; behavior matches user intent
+- **Gap Analysis:** Remaining work is observability and documentation only
+- **Implementation Plan:** Minimal approach (logging + XML documentation; no behavioral changes)
+- **Key Learning:** Distinguish implementation from clarification to avoid duplicate issues; honest framing prevents rework
+
+**Next:** Link can begin Issue #59 as low-priority polish, no blockers.

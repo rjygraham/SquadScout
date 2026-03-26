@@ -7,6 +7,21 @@
 - Stack: .NET host process, Azure Web PubSub, Entra-backed auth, Azure Function token issuance, and possible Orleans replay state.
 - Key concerns: reconnect tests, dropped-connection recovery, session start behavior, and cross-component regression coverage.
 
+## Core Context
+
+### Phase 1 Session Telemetry & Replay Diagnostics (Issue #17, PR #57)
+
+**Completion Decision:** PR #57 approved and merged (2026-03-25, commit `57ebc0a`). Phase 1 session telemetry foundation complete.
+
+- **Approval Chain:** Switch (failure-mode coverage audit) → Morpheus (security/performance) → Ralph (merge)
+- **Coverage:** All 6 critical failure modes explicitly tested (buffer overflow, secret leakage, gap detection, generation reset, client forward, heartbeat pollution)
+- **Test Results:** 126/126 tests passing; build clean (0 warnings)
+- **Secret-Safety:** `SecretRedactor.Redact(JsonElement)` extended; all payload previews redacted before export
+- **Diagnostics Export:** `GET /api/sessions/{sessionId}/telemetry` provides broker-sourced telemetry snapshot with replay window, sequencing state, diagnostic events
+- **Phase 1 Gate:** End-to-end input → PTY → replay → telemetry datapath proven with integration tests
+- **Non-blocking Advisory:** Telemetry export creates full snapshot per request (acceptable for Phase 1 manual diagnostics; defer rate-limiting to Phase 4 if polling becomes automated)
+- **Outcome:** Phase 1 diagnostics seam unlocked; Phase 2 Orleans integration unblocked; Issue #17 closed
+
 ## Learnings
 
 - **Web PubSub Upstream Auth:** The upstream handler uses `WebPubSubUpstreamAuthenticator` which supports both `WebHook-Signature` (HMAC-SHA256) and Managed Identity (Easy Auth).
