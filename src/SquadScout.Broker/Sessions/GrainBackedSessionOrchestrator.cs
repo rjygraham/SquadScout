@@ -257,10 +257,7 @@ public sealed class GrainBackedSessionOrchestrator : ISessionOrchestrator
             }
 
             gate.IsRetired = true;
-            if (gate.LeaseCount == 0)
-            {
-                _clientMessageGates.Remove(sessionId);
-            }
+            TryRemoveRetiredClientMessageGate(sessionId, gate);
         }
     }
 
@@ -275,14 +272,22 @@ public sealed class GrainBackedSessionOrchestrator : ISessionOrchestrator
         lock (_clientMessageGateSync)
         {
             gate.LeaseCount--;
-            if (gate.IsRetired &&
-                gate.LeaseCount == 0 &&
-                _clientMessageGates.TryGetValue(sessionId, out var currentGate) &&
-                ReferenceEquals(currentGate, gate))
-            {
-                _clientMessageGates.Remove(sessionId);
-            }
+            TryRemoveRetiredClientMessageGate(sessionId, gate);
         }
+    }
+
+    private void TryRemoveRetiredClientMessageGate(string sessionId, SessionClientMessageGate gate)
+    {
+        if (!gate.IsRetired ||
+            gate.LeaseCount != 0 ||
+            !_clientMessageGates.TryGetValue(sessionId, out var currentGate) ||
+            !ReferenceEquals(currentGate, gate))
+        {
+            return;
+        }
+
+        _clientMessageGates.Remove(sessionId);
+        gate.Semaphore.Dispose();
     }
 
     private sealed class SessionClientMessageGate
