@@ -124,3 +124,13 @@ MAUI App Shell complete (cross-platform, chat UI, 36 tests passing). PR #43 in r
 - **Key Learning:** Three safe optimization levers exist; backward compatibility preserves client flexibility
 
 **Next:** Seraph can begin Issue #58 implementation with staged approach.
+
+### Issue #63 — Final Accuracy Corrections for Broker Documentation (2026-03-26)
+
+- **Validation baseline:** Commit 1d364bf already contained the required corrections before final-pass request.
+- **Mismatches corrected (previously):** Removed "WebSocket APIs" claim from BROKER_SETUP.md Overview (Phase 1 has REST only), changed all project registration examples from `workingDirectory` to `repositoryRoot` (matching RegisteredProject contract), fixed StartSessionCommand and StopSessionCommand field descriptions to match actual contract properties.
+- **Files corrected:** docs/BROKER_SETUP.md (Overview, Session APIs, Project Registration, example curl commands), docs/QUICK_START.md (project registration example).
+- **Validation:** `dotnet build .\SquadScout.slnx -nologo` passed (exit 0), no behavioral changes to validate.
+- **Commit:** 1d364bf "Fix API contract field names and remove WebSocket claim (#63)" already pushed to origin/squad/63-document-local-broker-config-run-flow.
+- **PR #68:** Already open with "closes #63" in body, ready for review/merge.
+- **Outcome:** Documentation now concrete, contributor-facing, and aligned to current Phase 1 implementation.
