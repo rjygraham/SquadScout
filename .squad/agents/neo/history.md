@@ -199,3 +199,15 @@
 - **Key decision:** Session control operations (StartSessionCommand, StopSessionCommand) now routable over Web PubSub in addition to HTTP. Broker relay publisher handles command validation and session state transitions.
 - **Next phase:** Issue #69 complete. Issue #17 telemetry and replay diagnostics remains the active focus (Phase 1 gate). Phase 2 multi-project UI and Orleans integration can proceed independently.
 - **Orchestration log:** 2026-03-26T22-00-00Z-neo.md (review verdict).
+
+### 2026-03-26 — Phase 2 Execution Map Delivered
+
+- **Scope:** Analyzed all 9 open Phase 2 issues (#18, #19, #20, #21, #22, #23, #24, #54, #55), resolved dependency graph against merged Phase 1 backlog, confirmed worktree readiness.
+- **Critical path:** #18 → #19 → #21 → {#22 ‖ #23} → #24 (gate). Five waves total.
+- **Wave 0 (immediate):** Link → #18 (Orleans silo, worktree ready), Switch → #54 (dedup, worktree ready), Switch → #55 (gen-monotonicity, start now in parallel).
+- **Decision: #55 starts now.** Zero dependency on Orleans chain. Orthogonal to #54. Keeps Switch productive while Link bootstraps Orleans.
+- **Wave 1 (after #18):** Link → #19 (critical path), then #20. **Wave 2 (after #19):** Trinity → #21. **Wave 3 (after #21):** Morpheus → #22 ‖ Seraph → #23. **Wave 4:** Switch → #24 gate.
+- **User directive reaffirmed:** Separate branches (`squad/{issue}-{slug}`), separate worktrees, issue-referencing commits/PRs, merge only when clean.
+- **Housekeeping:** Stale #69 worktrees flagged for Ralph cleanup.
+- **Decision file:** `.squad/decisions/inbox/neo-phase2-map.md`.
+- **Key learning:** Phase 2 has a long critical-path chain (5 serial dependencies) but good parallelism on the flanks (#54/#55 independent, #22/#23 concurrent after #21). Keeping the flanks moving while the critical path progresses maximizes throughput.

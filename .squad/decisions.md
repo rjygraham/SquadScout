@@ -1,5 +1,10 @@
 # Decisions
 
+## 2026-03-26
+
+- **2026-03-26: User directive.** By Ryan Graham (via Copilot). For Phase 2 work, keep work on separate branches, reference the issue in commit messages and PR messages, and only merge when the branch is clean.
+- **2026-03-26: Neo — Phase 2 Execution Map.** Dependency-correct 5-wave plan for all 9 open Phase 2 issues. Critical path: #18 → #19 → #21 → {#22 ‖ #23} → #24. Wave 0 starts now: Link → #18, Switch → #54, Switch → #55. Decision: #55 starts immediately (zero Orleans dependency, orthogonal to #54). Full map in `.squad/decisions/inbox/neo-phase2-map.md`.
+
 ## 2026-03-25
 
 - **2026-03-25T21:51:34Z: Switch — PR #57 Approval (Comprehensive Review).** Approved for merge after failure-mode coverage audit. All 6 critical failure modes explicitly tested (replay overflow, secret leakage, gap detection, generation reset, client forward, heartbeat pollution). Build clean (0 warnings), full regression 126/126 passing. Secret-safe export validated end-to-end. Phase 1 gate datapath proven with integration tests. No blocking concerns.
