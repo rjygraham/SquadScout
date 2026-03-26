@@ -66,8 +66,16 @@ public sealed class OrleansSessionGrainTests
         Assert.False(replay.Payload.GapDetected);
         Assert.Collection(
             replay.Payload.Messages,
-            message => Assert.Equal(1, message.Sequence),
-            message => Assert.Equal(2, message.Sequence));
+            message =>
+            {
+                Assert.Equal(1, message.Sequence);
+                Assert.Null(message.AcknowledgedSequence);
+            },
+            message =>
+            {
+                Assert.Equal(2, message.Sequence);
+                Assert.Equal(1, message.AcknowledgedSequence);
+            });
     }
 
     [Fact]
@@ -393,6 +401,7 @@ public sealed class OrleansSessionGrainTests
             {
                 Assert.Equal(1, message.Sequence);
                 Assert.Equal(nextGeneration, message.Generation);
+                Assert.Null(message.AcknowledgedSequence);
             });
     }
 
