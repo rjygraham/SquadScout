@@ -38,6 +38,9 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
     private long _currentGeneration = SessionEnvelopeContract.InitialGeneration;
     private long? _acknowledgedSequence;
     private long? _highestObservedBrokerSequence;
+    private readonly HashSet<long> _observedBrokerSequences = new();
+    private readonly HashSet<long> _appliedBrokerSequences = new();
+    private readonly HashSet<string> _appliedReplayResponseMessageIds = new(StringComparer.Ordinal);
     private bool _gapDetected;
     private bool _replayRequestPending;
 
@@ -488,22 +491,30 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             return false;
         }
 
-        if (envelope.MessageType == SessionMessageType.ReplayResponse)
+        var tracking = TrackBrokerEnvelope(envelope);
+        if (!tracking.ShouldProcess)
         {
-            return await ApplyReplayResponseAsync(envelope, cancellationToken).ConfigureAwait(false);
+            return true;
         }
 
-        var gapJustDetected = TrackBrokerSequence(envelope);
-        AppendTraffic(
-            new MessageEnvelopeTraffic
-            {
-                Direction = MessageTrafficDirection.Incoming,
-                Envelope = ToJsonEnvelope(envelope),
-                ObservedAtUtc = DateTimeOffset.UtcNow,
-                Summary = $"Received {envelope.MessageType} for session '{envelope.SessionId}'."
-            });
+        if (envelope.MessageType == SessionMessageType.ReplayResponse)
+        {
+            return await ApplyReplayResponseAsync(envelope, tracking, cancellationToken).ConfigureAwait(false);
+        }
 
-        if (gapJustDetected)
+        if (tracking.ShouldAppend)
+        {
+            AppendTraffic(
+                new MessageEnvelopeTraffic
+                {
+                    Direction = MessageTrafficDirection.Incoming,
+                    Envelope = ToJsonEnvelope(envelope),
+                    ObservedAtUtc = DateTimeOffset.UtcNow,
+                    Summary = $"Received {envelope.MessageType} for session '{envelope.SessionId}'."
+                });
+        }
+
+        if (tracking.GapJustDetected)
         {
             PublishStatus(
                 CurrentStatus with
@@ -520,6 +531,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
 
     private async Task<bool> ApplyReplayResponseAsync(
         MessageEnvelope<JsonElement> envelope,
+        BrokerEnvelopeTrackingResult tracking,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -532,6 +544,18 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             _replayRequestPending = false;
         }
 
+        if (tracking.ShouldAppend)
+        {
+            AppendTraffic(
+                new MessageEnvelopeTraffic
+                {
+                    Direction = MessageTrafficDirection.Incoming,
+                    Envelope = ToJsonEnvelope(envelope),
+                    ObservedAtUtc = DateTimeOffset.UtcNow,
+                    Summary = $"Received replay response for session '{envelope.SessionId}'."
+                });
+        }
+
         if (payload.Generation != envelope.Generation)
         {
             PublishInvalidReplayGenerationBoundary(
@@ -541,15 +565,6 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 "replay payload");
             return false;
         }
-
-        AppendTraffic(
-            new MessageEnvelopeTraffic
-            {
-                Direction = MessageTrafficDirection.Incoming,
-                Envelope = ToJsonEnvelope(envelope),
-                ObservedAtUtc = DateTimeOffset.UtcNow,
-                Summary = $"Received replay response for session '{envelope.SessionId}'."
-            });
 
         if (payload.GapDetected)
         {
@@ -569,7 +584,12 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 return false;
             }
 
-            TrackBrokerSequence(replayedEnvelope);
+            var replayTracking = TrackBrokerEnvelope(replayedEnvelope);
+            if (!replayTracking.ShouldProcess || !replayTracking.ShouldAppend)
+            {
+                continue;
+            }
+
             AppendTraffic(
                 new MessageEnvelopeTraffic
                 {
@@ -592,44 +612,90 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         return true;
     }
 
-    private bool TrackBrokerSequence(MessageEnvelope<JsonElement> envelope)
+    private BrokerEnvelopeTrackingResult TrackBrokerEnvelope(MessageEnvelope<JsonElement> envelope)
     {
         lock (_stateSync)
         {
-            if (envelope.Generation != _currentGeneration)
+            if (_activeSession is null || !MatchesActiveSessionLocked(envelope.ProjectId, envelope.SessionId))
             {
-                _currentGeneration = envelope.Generation;
-                _acknowledgedSequence = null;
-                _highestObservedBrokerSequence = null;
-                _gapDetected = false;
-                _replayRequestPending = false;
+                return new BrokerEnvelopeTrackingResult(ShouldProcess: false, ShouldAppend: false, GapJustDetected: false);
             }
 
-            var gapJustDetected = false;
-            if (envelope.Sequence is long sequence)
+            if (envelope.Generation < _currentGeneration)
             {
-                _highestObservedBrokerSequence = Math.Max(_highestObservedBrokerSequence ?? 0, sequence);
-
-                var expectedSequence = (_acknowledgedSequence ?? 0) + 1;
-                if (sequence == expectedSequence)
-                {
-                    _acknowledgedSequence = sequence;
-                    _gapDetected = (_acknowledgedSequence ?? 0) < (_highestObservedBrokerSequence ?? 0);
-                }
-                else if (sequence > expectedSequence)
-                {
-                    gapJustDetected = !_gapDetected && !_replayRequestPending;
-                    _gapDetected = true;
-                }
-                else
-                {
-                    _gapDetected = (_acknowledgedSequence ?? 0) < (_highestObservedBrokerSequence ?? 0);
-                }
+                return new BrokerEnvelopeTrackingResult(ShouldProcess: false, ShouldAppend: false, GapJustDetected: false);
             }
 
-            return gapJustDetected;
+            if (envelope.Generation > _currentGeneration)
+            {
+                ResetBrokerOrderingStateLocked(envelope.Generation);
+            }
+
+            if (envelope.Sequence is not long sequence)
+            {
+                if (envelope.MessageType == SessionMessageType.ReplayResponse &&
+                    !string.IsNullOrWhiteSpace(envelope.MessageId))
+                {
+                    var shouldProcessReplayResponse = _appliedReplayResponseMessageIds.Add(envelope.MessageId);
+                    return new BrokerEnvelopeTrackingResult(
+                        ShouldProcess: shouldProcessReplayResponse,
+                        ShouldAppend: shouldProcessReplayResponse,
+                        GapJustDetected: false);
+                }
+
+                return new BrokerEnvelopeTrackingResult(ShouldProcess: true, ShouldAppend: true, GapJustDetected: false);
+            }
+
+            var expectedSequence = (_acknowledgedSequence ?? 0) + 1;
+            var isNewSequence = _observedBrokerSequences.Add(sequence);
+            _highestObservedBrokerSequence = Math.Max(_highestObservedBrokerSequence ?? 0, sequence);
+
+            var gapJustDetected = isNewSequence &&
+                                  sequence > expectedSequence &&
+                                  !_gapDetected &&
+                                  !_replayRequestPending;
+
+            AdvanceAcknowledgedSequenceLocked();
+            _gapDetected = (_acknowledgedSequence ?? 0) < (_highestObservedBrokerSequence ?? 0);
+
+            return new BrokerEnvelopeTrackingResult(
+                ShouldProcess: true,
+                ShouldAppend: _appliedBrokerSequences.Add(sequence),
+                GapJustDetected: gapJustDetected);
         }
     }
+
+    private void AdvanceAcknowledgedSequenceLocked()
+    {
+        var nextSequence = (_acknowledgedSequence ?? 0) + 1;
+        while (_observedBrokerSequences.Contains(nextSequence))
+        {
+            _acknowledgedSequence = nextSequence;
+            nextSequence++;
+        }
+    }
+
+    private bool MatchesActiveSessionLocked(string projectId, string sessionId) =>
+        _activeSession is not null &&
+        string.Equals(_activeSession.ProjectId, projectId, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(_activeSession.SessionId, sessionId, StringComparison.OrdinalIgnoreCase);
+
+    private void ResetBrokerOrderingStateLocked(long generation)
+    {
+        _currentGeneration = generation;
+        _acknowledgedSequence = null;
+        _highestObservedBrokerSequence = null;
+        _observedBrokerSequences.Clear();
+        _appliedBrokerSequences.Clear();
+        _appliedReplayResponseMessageIds.Clear();
+        _gapDetected = false;
+        _replayRequestPending = false;
+    }
+
+    private readonly record struct BrokerEnvelopeTrackingResult(
+        bool ShouldProcess,
+        bool ShouldAppend,
+        bool GapJustDetected);
 
     private bool IsGapDetected()
     {
@@ -910,9 +976,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
     {
         lock (_stateSync)
         {
-            return _activeSession is not null &&
-                   string.Equals(_activeSession.SessionId, session.SessionId, StringComparison.OrdinalIgnoreCase) &&
-                   string.Equals(_activeSession.ProjectId, session.ProjectId, StringComparison.OrdinalIgnoreCase);
+            return MatchesActiveSessionLocked(session.ProjectId, session.SessionId);
         }
     }
 
@@ -930,11 +994,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         {
             _negotiation = null;
             _connectionId = null;
-            _currentGeneration = SessionEnvelopeContract.InitialGeneration;
-            _acknowledgedSequence = null;
-            _highestObservedBrokerSequence = null;
-            _gapDetected = false;
-            _replayRequestPending = false;
+            ResetBrokerOrderingStateLocked(SessionEnvelopeContract.InitialGeneration);
             _nextAckId = 0;
             _nextClientSequence = 0;
             if (clearTraffic)
