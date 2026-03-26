@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using SquadScout.Broker.Orleans;
@@ -12,7 +11,8 @@ public sealed class GrainBackedSessionOrchestrator : ISessionOrchestrator
 {
     private readonly IRelayPublisher _relayPublisher;
     private readonly ISessionGrainFactory _grainFactory;
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _clientMessageGates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _clientMessageGateSync = new();
+    private readonly Dictionary<string, SessionClientMessageGate> _clientMessageGates = new(StringComparer.OrdinalIgnoreCase);
 
     public GrainBackedSessionOrchestrator(IRelayPublisher relayPublisher, ISessionGrainFactory grainFactory)
     {
@@ -78,7 +78,7 @@ public sealed class GrainBackedSessionOrchestrator : ISessionOrchestrator
         {
             if (IsStoppedLifecycleEnvelope(envelope))
             {
-                RemoveClientMessageGate(sessionId);
+                RetireClientMessageGate(sessionId);
             }
         }
 
@@ -105,8 +105,7 @@ public sealed class GrainBackedSessionOrchestrator : ISessionOrchestrator
         ArgumentNullException.ThrowIfNull(envelope);
         ArgumentNullException.ThrowIfNull(onAcceptedAsync);
 
-        var gate = GetClientMessageGate(sessionId);
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var gate = await AcquireClientMessageGateAsync(sessionId, cancellationToken).ConfigureAwait(false);
         try
         {
             var grain = GetRequiredSessionGrain(sessionId);
@@ -142,7 +141,7 @@ public sealed class GrainBackedSessionOrchestrator : ISessionOrchestrator
         }
         finally
         {
-            gate.Release();
+            ReleaseClientMessageGate(sessionId, gate);
         }
     }
 
@@ -154,8 +153,7 @@ public sealed class GrainBackedSessionOrchestrator : ISessionOrchestrator
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(request);
 
-        var gate = GetClientMessageGate(sessionId);
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var gate = await AcquireClientMessageGateAsync(sessionId, cancellationToken).ConfigureAwait(false);
         try
         {
             var responseRecord = await GetRequiredSessionGrain(sessionId)
@@ -187,7 +185,7 @@ public sealed class GrainBackedSessionOrchestrator : ISessionOrchestrator
         }
         finally
         {
-            gate.Release();
+            ReleaseClientMessageGate(sessionId, gate);
         }
     }
 
@@ -214,9 +212,19 @@ public sealed class GrainBackedSessionOrchestrator : ISessionOrchestrator
         return _grainFactory.GetGrain(sessionId);
     }
 
-    private void RemoveClientMessageGate(string sessionId)
+    private async Task<SessionClientMessageGate> AcquireClientMessageGateAsync(string sessionId, CancellationToken cancellationToken)
     {
-        _clientMessageGates.TryRemove(sessionId, out _);
+        var gate = RentClientMessageGate(sessionId);
+        try
+        {
+            await gate.Semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return gate;
+        }
+        catch
+        {
+            ReleaseClientMessageGateLease(sessionId, gate);
+            throw;
+        }
     }
 
     private static bool IsStoppedLifecycleEnvelope<TPayload>(MessageEnvelope<TPayload> envelope) =>
@@ -224,6 +232,65 @@ public sealed class GrainBackedSessionOrchestrator : ISessionOrchestrator
         && envelope.Payload is SessionLifecyclePayload lifecycle
         && lifecycle.State == SessionState.Stopped;
 
-    private SemaphoreSlim GetClientMessageGate(string sessionId) =>
-        _clientMessageGates.GetOrAdd(sessionId, static _ => new SemaphoreSlim(1, 1));
+    private SessionClientMessageGate RentClientMessageGate(string sessionId)
+    {
+        lock (_clientMessageGateSync)
+        {
+            if (!_clientMessageGates.TryGetValue(sessionId, out var gate))
+            {
+                gate = new SessionClientMessageGate();
+                _clientMessageGates[sessionId] = gate;
+            }
+
+            gate.LeaseCount++;
+            return gate;
+        }
+    }
+
+    private void RetireClientMessageGate(string sessionId)
+    {
+        lock (_clientMessageGateSync)
+        {
+            if (!_clientMessageGates.TryGetValue(sessionId, out var gate))
+            {
+                return;
+            }
+
+            gate.IsRetired = true;
+            if (gate.LeaseCount == 0)
+            {
+                _clientMessageGates.Remove(sessionId);
+            }
+        }
+    }
+
+    private void ReleaseClientMessageGate(string sessionId, SessionClientMessageGate gate)
+    {
+        gate.Semaphore.Release();
+        ReleaseClientMessageGateLease(sessionId, gate);
+    }
+
+    private void ReleaseClientMessageGateLease(string sessionId, SessionClientMessageGate gate)
+    {
+        lock (_clientMessageGateSync)
+        {
+            gate.LeaseCount--;
+            if (gate.IsRetired &&
+                gate.LeaseCount == 0 &&
+                _clientMessageGates.TryGetValue(sessionId, out var currentGate) &&
+                ReferenceEquals(currentGate, gate))
+            {
+                _clientMessageGates.Remove(sessionId);
+            }
+        }
+    }
+
+    private sealed class SessionClientMessageGate
+    {
+        public SemaphoreSlim Semaphore { get; } = new(1, 1);
+
+        public int LeaseCount { get; set; }
+
+        public bool IsRetired { get; set; }
+    }
 }

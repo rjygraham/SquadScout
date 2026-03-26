@@ -222,6 +222,58 @@ public sealed class OrleansSessionGrainTests
     }
 
     [Fact]
+    public async Task GrainBackedOrchestratorKeepsSerializingMessagesWhileStopRetiresGate()
+    {
+        var orchestrator = new GrainBackedSessionOrchestrator(new NullRelayPublisher(), new TestSessionGrainFactory());
+        var session = await orchestrator.StartAsync(new StartSessionCommand
+        {
+            ProjectId = "broker",
+            RequestedBy = "tests"
+        });
+
+        var firstAcceptedEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstMessage = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstAccepted = orchestrator.AcceptClientMessageAsync(
+            session.SessionId,
+            CreateInputEnvelope(session, clientSequence: 1, acknowledgedSequence: null, content: "first\n"),
+            async (_, _) =>
+            {
+                firstAcceptedEntered.SetResult();
+                await releaseFirstMessage.Task.ConfigureAwait(true);
+            });
+
+        await firstAcceptedEntered.Task.ConfigureAwait(false);
+
+        await orchestrator.RecordBrokerMessageAsync(
+            session.SessionId,
+            CreateBrokerCommand(
+                SessionMessageType.SessionLifecycle,
+                "relay-stopped-concurrent",
+                "corr-stopped-concurrent",
+                new SessionLifecyclePayload
+                {
+                    State = SessionState.Stopped,
+                    Reason = "tests"
+                }));
+
+        var secondAccepted = orchestrator.ValidateClientMessageAsync(
+            session.SessionId,
+            CreateInputEnvelope(session, clientSequence: 2, acknowledgedSequence: null, content: "second\n"));
+
+        await Task.Delay(50);
+        Assert.False(secondAccepted.IsCompleted);
+
+        releaseFirstMessage.SetResult();
+
+        var firstResult = await firstAccepted;
+        var secondResult = await secondAccepted;
+
+        Assert.Equal(SequenceValidationStatus.Accepted, firstResult.Status);
+        Assert.Equal(SequenceValidationStatus.Accepted, secondResult.Status);
+        Assert.Equal(0, GetClientMessageGateCount(orchestrator));
+    }
+
+    [Fact]
     public async Task SessionGrainConcurrentLoadReadsPersistentStateOnce()
     {
         var persistentState = new TestPersistentState
@@ -363,7 +415,7 @@ public sealed class OrleansSessionGrainTests
     {
         var field = typeof(GrainBackedSessionOrchestrator).GetField("_clientMessageGates", BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("Unable to inspect client message gates.");
-        var gates = field.GetValue(orchestrator) as ConcurrentDictionary<string, SemaphoreSlim>
+        var gates = field.GetValue(orchestrator) as System.Collections.IDictionary
             ?? throw new InvalidOperationException("Client message gate store had an unexpected shape.");
         return gates.Count;
     }

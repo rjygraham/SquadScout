@@ -11,7 +11,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
 {
     private readonly IPersistentState<SessionGrainState> _persistentState;
     private readonly int _replayBufferCapacity;
-    private readonly SemaphoreSlim _loadGate = new(1, 1);
+    private SemaphoreSlim _loadGate = new(1, 1);
     private SessionRuntimeState? _runtime;
     private bool _stateLoaded;
 
@@ -33,6 +33,9 @@ public sealed class SessionGrain : Grain, ISessionGrain
     {
         _runtime = null;
         _stateLoaded = false;
+        var loadGate = _loadGate;
+        _loadGate = new SemaphoreSlim(1, 1);
+        loadGate.Dispose();
         return base.OnDeactivateAsync(reason, cancellationToken);
     }
 
