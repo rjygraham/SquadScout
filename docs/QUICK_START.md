@@ -65,4 +65,4 @@ See **[BROKER_SETUP.md](./BROKER_SETUP.md)** for detailed configuration, environ
 
 - Review session lifecycle in the broker [Sessions guide](../src/SquadScout.Broker/Sessions/README.md) (if available).
 - Enable Azure Web PubSub for remote client routing.
-- Run tests: `dotnet test SquadScout.slnx`.
+- Run focused broker tests: `dotnet test .\tests\SquadScout.Broker.Tests\SquadScout.Broker.Tests.csproj`.

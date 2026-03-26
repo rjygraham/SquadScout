@@ -250,7 +250,7 @@ curl -X POST http://localhost:5050/api/projects \
 ```bash
 cd D:\GitHub\SquadScout
 dotnet build SquadScout.slnx
-dotnet test SquadScout.slnx
+dotnet test .\tests\SquadScout.Broker.Tests\SquadScout.Broker.Tests.csproj
 ```
 
 ### 2. Run Broker Standalone
@@ -317,7 +317,7 @@ taskkill /PID <PID> /F
 copilot --version
 
 # If not on PATH, set ExecutablePath to full path
- dotnet run -- --CopilotPty:ExecutablePath="C:\Program Files\GitHub\Copilot\copilot.exe"
+dotnet run -- --CopilotPty:ExecutablePath="C:\Program Files\GitHub\Copilot\copilot.exe"
 ```
 
 ### PTY buffer overflow
