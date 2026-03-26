@@ -352,6 +352,48 @@ public sealed class PubSubConnectionServiceTests
     }
 
     [Fact]
+    public async Task NewHeartbeatExtendsDeadlineWithoutTriggeringStaleTimeout()
+    {
+        var session = CreateSession();
+        var clock = new MutableClock(new DateTimeOffset(2026, 03, 26, 10, 00, 00, TimeSpan.Zero));
+        var delay = new ControlledDelay();
+        var socket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-heartbeat-extend")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        await using var service = CreateService(
+            new RecordingNegotiationClient(CreateNegotiationResponse(session, refreshAtUtc: DateTimeOffset.MinValue)),
+            clock.GetUtcNow,
+            delay.DelayAsync,
+            socket);
+        await service.PrepareForSessionAsync(session);
+
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerHeartbeatEnvelope(session, nonce: "nonce-initial", timeoutSeconds: 3)));
+        await WaitForAsync(() => delay.RequestedDelays.Count == 1 && socket.SentTexts.Count >= 2);
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerHeartbeatEnvelope(session, nonce: "nonce-refresh", timeoutSeconds: 5)));
+        await WaitForAsync(() => socket.SentTexts.Count >= 3);
+
+        clock.Advance(TimeSpan.FromSeconds(3));
+        delay.ReleaseNext();
+        await Task.Delay(100);
+
+        Assert.Equal(MessageConnectionState.Connected, service.CurrentStatus.State);
+        Assert.Equal(WebSocketState.Open, socket.State);
+    }
+
+    [Fact]
     public async Task ReconnectAsyncAfterHeartbeatTimeoutRequestsReplayFromLastAcknowledgedSequence()
     {
         var session = CreateSession();

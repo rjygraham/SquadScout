@@ -605,7 +605,8 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             return true;
         }
 
-        await SendHeartbeatAcknowledgementAsync(payload, cancellationToken).ConfigureAwait(false);
+        var acknowledgement = CreateHeartbeatAcknowledgementEnvelope(payload);
+        QueueHeartbeatAcknowledgement(acknowledgement, cancellationToken);
         return true;
     }
 
@@ -951,16 +952,13 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         }
     }
 
-    private async Task SendHeartbeatAcknowledgementAsync(
-        HeartbeatPayload brokerHeartbeat,
-        CancellationToken cancellationToken)
+    private MessageEnvelope<HeartbeatPayload> CreateHeartbeatAcknowledgementEnvelope(HeartbeatPayload brokerHeartbeat)
     {
         if (string.IsNullOrWhiteSpace(brokerHeartbeat.Nonce))
         {
             throw new InvalidOperationException("Broker heartbeat acknowledgements require a nonce.");
         }
 
-        MessageEnvelope<HeartbeatPayload> heartbeat;
         lock (_stateSync)
         {
             if (_activeSession is null)
@@ -969,7 +967,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             }
 
             var nextClientSequence = ++_nextClientSequence;
-            heartbeat = new MessageEnvelope<HeartbeatPayload>
+            return new MessageEnvelope<HeartbeatPayload>
             {
                 ProjectId = _activeSession.ProjectId,
                 SessionId = _activeSession.SessionId,
@@ -983,7 +981,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 CorrelationId = $"mobile-session:{_activeSession.SessionId}",
                 Payload = new HeartbeatPayload
                 {
-                    ReplayRequested = CurrentStatus.IsReplayPending,
+                    ReplayRequested = _currentStatus.IsReplayPending,
                     ExpectedIntervalSeconds = brokerHeartbeat.ExpectedIntervalSeconds,
                     LivenessTimeoutSeconds = brokerHeartbeat.LivenessTimeoutSeconds,
                     SenderInstanceId = _clientInstanceId,
@@ -991,15 +989,37 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 }
             };
         }
+    }
 
-        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+    private void QueueHeartbeatAcknowledgement(
+        MessageEnvelope<HeartbeatPayload> heartbeat,
+        CancellationToken cancellationToken)
+    {
+        _ = RunHeartbeatAcknowledgementAsync(heartbeat, cancellationToken);
+    }
+
+    private async Task RunHeartbeatAcknowledgementAsync(
+        MessageEnvelope<HeartbeatPayload> heartbeat,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            await SendEnvelopeCoreAsync(heartbeat, requireConnectedStatus: true, cancellationToken).ConfigureAwait(false);
+            await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await SendEnvelopeCoreAsync(heartbeat, requireConnectedStatus: true, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _operationGate.Release();
+            }
         }
-        finally
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            _operationGate.Release();
+        }
+        catch (Exception ex)
+        {
+            PublishReceiveFault($"The live session stream could not acknowledge heartbeat: {ex.Message}");
         }
     }
 
@@ -1384,14 +1404,23 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
 
             if (deadlineUtc is null)
             {
-                return;
+                try
+                {
+                    await _delayAsync(TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                continue;
             }
 
             var delay = deadlineUtc.Value - _utcNow();
             if (delay <= TimeSpan.Zero)
             {
-                await HandleBrokerHeartbeatTimeoutAsync().ConfigureAwait(false);
-                return;
+                await HandleBrokerHeartbeatTimeoutAsync(deadlineUtc.Value).ConfigureAwait(false);
+                continue;
             }
 
             try
@@ -1402,19 +1431,45 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             {
                 return;
             }
+
+            bool shouldTimeout;
+            lock (_stateSync)
+            {
+                shouldTimeout = _brokerHeartbeatDeadlineUtc is DateTimeOffset currentDeadlineUtc &&
+                                currentDeadlineUtc == deadlineUtc.Value &&
+                                currentDeadlineUtc <= _utcNow();
+            }
+
+            if (!shouldTimeout)
+            {
+                continue;
+            }
+
+            await HandleBrokerHeartbeatTimeoutAsync(deadlineUtc.Value).ConfigureAwait(false);
         }
     }
 
-    private async Task HandleBrokerHeartbeatTimeoutAsync()
+    private async Task HandleBrokerHeartbeatTimeoutAsync(DateTimeOffset expectedDeadlineUtc)
     {
-        var session = GetActiveSession();
-        if (session is null)
+        SessionDescriptor? session;
+        int reconnectAttempt;
+        lock (_stateSync)
         {
-            return;
+            if (_activeSession is null ||
+                _currentStatus.State != MessageConnectionState.Connected ||
+                _brokerHeartbeatDeadlineUtc is not DateTimeOffset currentDeadlineUtc ||
+                currentDeadlineUtc != expectedDeadlineUtc ||
+                currentDeadlineUtc > _utcNow())
+            {
+                return;
+            }
+
+            session = _activeSession;
+            reconnectAttempt = _currentStatus.ReconnectAttempt;
         }
 
         await CleanupTransportAsync(CancellationToken.None, skipAwaitLivenessMonitor: true).ConfigureAwait(false);
-        PublishStatus(CreateFaultedStatus(session, CurrentStatus.ReconnectAttempt, HeartbeatTimeoutFailureReason));
+        PublishStatus(CreateFaultedStatus(session, reconnectAttempt, HeartbeatTimeoutFailureReason));
     }
 
     private void PublishStatus(MessageConnectionStatus status)
