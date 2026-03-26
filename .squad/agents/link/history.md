@@ -242,3 +242,11 @@
 - **Key Learning:** Distinguish implementation from clarification to avoid duplicate issues; honest framing prevents rework
 
 **Next:** Link can begin Issue #59 as low-priority polish, no blockers.
+
+### Issue #18 Orleans Silo Host & SQLite Bootstrap (2026-03-26)
+
+- **Accepted scope held to infrastructure/bootstrap only:** `src\SquadScout.Broker\Program.cs` now conditionally starts a local Orleans silo with `UseLocalhostClustering()` and ADO.NET grain storage, but `ISessionOrchestrator` / `IProjectCatalog` intentionally stay on the Phase 1 in-memory implementations until the follow-on grain migration issues land.
+- **SQLite bootstrap made self-contained and repeatable:** `src\SquadScout.Broker\Orleans\OrleansSqliteSchemaBootstrapper.cs` resolves the configured SQLite path, creates parent folders, loads embedded `Sqlite-Main.sql` + `Sqlite-Persistence.sql`, and validates both required tables plus the storage query keys before broker startup proceeds.
+- **Upstream Orleans SQLite support needed a local compatibility shim:** `src\SquadScout.Broker\Orleans\OrleansSqliteCompatibilityShim.cs` patches the Orleans ADO.NET provider's invariant/constants/provider-factory maps at runtime so `Microsoft.Data.Sqlite` can initialize cleanly for the local single-silo broker path.
+- **Operator visibility added for the migration seam:** `/api/orleans/status` and the root broker payload now report disabled vs bootstrap-only mode, schema readiness, DB path, and whether the SQLite compatibility shim was applied.
+- **Validation:** `dotnet build .\SquadScout.slnx -nologo`, `dotnet test .\SquadScout.slnx -nologo --no-build`, and a live `dotnet run --project .\src\SquadScout.Broker\SquadScout.Broker.csproj --no-launch-profile` smoke check all passed; the final smoke run confirmed `http://127.0.0.1:5073` and `/api/orleans/status` work with the SQLite-backed silo enabled.
