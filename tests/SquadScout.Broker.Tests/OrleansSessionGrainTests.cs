@@ -423,6 +423,21 @@ public sealed class OrleansSessionGrainTests
             project => Assert.Equal("mobile", project.ProjectId));
     }
 
+    [Fact]
+    public async Task ProjectGrainRejectsMismatchedProjectIdentifier()
+    {
+        var projectGrain = new TestProjectGrainFactory().GetGrain("broker");
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => projectGrain.UpsertAsync(new RegisteredProjectRecord
+        {
+            ProjectId = "mobile",
+            DisplayName = "Mobile",
+            RepositoryRoot = GetRepositoryRoot()
+        }));
+
+        Assert.Equal("project", exception.ParamName);
+    }
+
     private static BrokerEnvelopeCommand<TPayload> CreateBrokerCommand<TPayload>(
         SessionMessageType messageType,
         string messageId,
@@ -525,7 +540,7 @@ public sealed class OrleansSessionGrainTests
         public IProjectGrain GetGrain(string projectId)
         {
             var persistentState = _states.GetOrAdd(projectId, static _ => new TestProjectPersistentState());
-            return new ProjectGrain(persistentState);
+            return new ProjectGrain(persistentState, () => projectId);
         }
     }
 

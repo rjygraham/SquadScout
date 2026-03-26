@@ -5,6 +5,7 @@ namespace SquadScout.Broker.Orleans;
 public sealed class ProjectGrain : Grain, IProjectGrain
 {
     private readonly IPersistentState<ProjectGrainState> _persistentState;
+    private readonly Func<string>? _projectIdProvider;
     private readonly object _loadGateSync = new();
     private LoadGateState _loadGate = new();
     private RegisteredProjectRecord? _project;
@@ -13,9 +14,11 @@ public sealed class ProjectGrain : Grain, IProjectGrain
 
     public ProjectGrain(
         [PersistentState("project", Configuration.OrleansHostOptions.DefaultStorageProvider)]
-        IPersistentState<ProjectGrainState> persistentState)
+        IPersistentState<ProjectGrainState> persistentState,
+        Func<string>? projectIdProvider = null)
     {
         _persistentState = persistentState ?? throw new ArgumentNullException(nameof(persistentState));
+        _projectIdProvider = projectIdProvider;
     }
 
     public override async Task OnActivateAsync(CancellationToken cancellationToken)
@@ -48,6 +51,12 @@ public sealed class ProjectGrain : Grain, IProjectGrain
         if (string.IsNullOrWhiteSpace(project.ProjectId))
         {
             throw new ArgumentException("A project id is required.", nameof(project));
+        }
+
+        var grainKey = _projectIdProvider?.Invoke() ?? this.GetPrimaryKeyString();
+        if (!string.Equals(project.ProjectId, grainKey, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Project id does not match the targeted project grain.", nameof(project));
         }
 
         _project = project.Clone();
