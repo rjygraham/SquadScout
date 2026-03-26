@@ -87,6 +87,56 @@ public sealed class PubSubConnectionServiceTests
     }
 
     [Fact]
+    public async Task DuplicateLiveBrokerEnvelopeDoesNotAppendTwiceOrRegressAcknowledgement()
+    {
+        var session = CreateSession();
+        var socket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-dup-live")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        await using var service = CreateService(new RecordingNegotiationClient(CreateNegotiationResponse(session)), socket);
+        await service.PrepareForSessionAsync(session);
+
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1)));
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1)));
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 2)));
+        await WaitForAsync(() =>
+            service.RecentTraffic.Count == 2 &&
+            service.RecentTraffic.Count(traffic =>
+                traffic.Direction == MessageTrafficDirection.Incoming &&
+                traffic.Envelope.Generation == SessionEnvelopeContract.InitialGeneration &&
+                traffic.Envelope.Sequence == 1) == 1 &&
+            service.RecentTraffic.Any(traffic =>
+                traffic.Direction == MessageTrafficDirection.Incoming &&
+                traffic.Envelope.Sequence == 2));
+
+        await service.SendInputAsync("after-duplicate");
+        await WaitForAsync(() => service.RecentTraffic.Count == 3);
+
+        using var sendCommand = JsonDocument.Parse(socket.SentTexts[1]);
+        var envelope = sendCommand.RootElement.GetProperty("data")
+            .Deserialize<MessageEnvelope<JsonElement>>(SessionMessageSerializer.DefaultOptions);
+
+        Assert.NotNull(envelope);
+        Assert.Equal(2, envelope!.AcknowledgedSequence);
+        Assert.Equal(1, envelope.ClientSequence);
+        Assert.Equal(1, service.RecentTraffic.Count(traffic =>
+            traffic.Direction == MessageTrafficDirection.Incoming &&
+            traffic.Envelope.Generation == SessionEnvelopeContract.InitialGeneration &&
+            traffic.Envelope.Sequence == 1));
+    }
+
+    [Fact]
     public async Task ReceiveLoopTracksGenerationGapAndUsesRecoveredBrokerAckForLaterInput()
     {
         var session = CreateSession();
@@ -139,13 +189,16 @@ public sealed class PubSubConnectionServiceTests
                 ToJsonEnvelope(CreateBrokerEnvelope(session, sequence: 2)),
                 ToJsonEnvelope(CreateBrokerEnvelope(session, sequence: 3))
             ])));
-        await WaitForAsync(() => service.RecentTraffic.Count >= 5);
+        await WaitForAsync(() => service.RecentTraffic.Count == 5);
 
         Assert.Equal(MessageConnectionState.Connected, service.CurrentStatus.State);
         Assert.DoesNotContain("gap", service.CurrentStatus.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, service.RecentTraffic.Count(traffic =>
+            traffic.Direction == MessageTrafficDirection.Incoming &&
+            traffic.Envelope.Sequence == 3));
 
         await service.SendInputAsync("after-recovery");
-        await WaitForAsync(() => service.RecentTraffic.Count >= 6);
+        await WaitForAsync(() => service.RecentTraffic.Count == 6);
 
         using var secondSendCommand = JsonDocument.Parse(socket.SentTexts[2]);
         var secondEnvelope = secondSendCommand.RootElement.GetProperty("data")
@@ -217,6 +270,75 @@ public sealed class PubSubConnectionServiceTests
         Assert.Equal(ReplayRequestReason.ReconnectResume, replayRequest.Payload.Reason);
         Assert.Equal(2, replayRequest.Payload.FromSequenceInclusive);
         Assert.Equal(1, replayRequest.AcknowledgedSequence);
+    }
+
+    [Fact]
+    public async Task DuplicateReplayResponseEnvelopeIsIgnoredOnTheReplayPath()
+    {
+        var session = CreateSession();
+        var socket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-dup-replay")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        await using var service = CreateService(new RecordingNegotiationClient(CreateNegotiationResponse(session)), socket);
+        await service.PrepareForSessionAsync(session);
+
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1)));
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 3)));
+        await WaitForAsync(() => socket.SentTexts.Count >= 2);
+
+        var replayResponse = CreateReplayResponseEnvelope(
+            session,
+            messageId: "replay-fixed",
+            messages:
+            [
+                ToJsonEnvelope(CreateBrokerEnvelope(session, sequence: 2)),
+                ToJsonEnvelope(CreateBrokerEnvelope(session, sequence: 3))
+            ]);
+
+        socket.EnqueueIncoming(GroupMessage(replayResponse));
+        await WaitForAsync(() =>
+            service.RecentTraffic.Count == 5 &&
+            service.RecentTraffic.Count(traffic =>
+                traffic.Direction == MessageTrafficDirection.Incoming &&
+                traffic.Envelope.MessageType == SessionMessageType.ReplayResponse &&
+                traffic.Envelope.MessageId == "replay-fixed") == 1);
+
+        socket.EnqueueIncoming(GroupMessage(replayResponse));
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 4)));
+        await WaitForAsync(() =>
+            service.RecentTraffic.Count == 6 &&
+            service.RecentTraffic.Count(traffic =>
+                traffic.Direction == MessageTrafficDirection.Incoming &&
+                traffic.Envelope.MessageType == SessionMessageType.ReplayResponse &&
+                traffic.Envelope.MessageId == "replay-fixed") == 1 &&
+            service.RecentTraffic.Any(traffic =>
+                traffic.Direction == MessageTrafficDirection.Incoming &&
+                traffic.Envelope.Sequence == 4));
+
+        await service.SendInputAsync("after-duplicate-replay");
+        await WaitForAsync(() => service.RecentTraffic.Count == 7);
+
+        using var sendCommand = JsonDocument.Parse(socket.SentTexts[2]);
+        var envelope = sendCommand.RootElement.GetProperty("data")
+            .Deserialize<MessageEnvelope<JsonElement>>(SessionMessageSerializer.DefaultOptions);
+
+        Assert.NotNull(envelope);
+        Assert.Equal(4, envelope!.AcknowledgedSequence);
+        Assert.Equal(1, service.RecentTraffic.Count(traffic =>
+            traffic.Direction == MessageTrafficDirection.Incoming &&
+            traffic.Envelope.MessageType == SessionMessageType.ReplayResponse &&
+            traffic.Envelope.MessageId == "replay-fixed"));
     }
 
     [Fact]
@@ -883,6 +1005,7 @@ public sealed class PubSubConnectionServiceTests
         long? availableFromSequence = null,
         long? availableToSequence = null,
         IReadOnlyList<MessageEnvelope<JsonElement>>? messages = null,
+        string? messageId = null,
         string? correlationId = null,
         string? causationId = null) =>
         new()
@@ -893,7 +1016,7 @@ public sealed class PubSubConnectionServiceTests
             MessageType = SessionMessageType.ReplayResponse,
             Direction = MessageDirection.BrokerToClient,
             TimestampUtc = DateTimeOffset.UtcNow,
-            MessageId = $"replay-{Guid.NewGuid():n}",
+            MessageId = messageId ?? $"replay-{Guid.NewGuid():n}",
             CorrelationId = correlationId ?? $"broker-session:{session.SessionId}",
             CausationId = causationId,
             Payload = new ReplayResponsePayload
