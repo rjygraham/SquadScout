@@ -24,6 +24,8 @@ All services start; dashboard at `http://localhost:18888`.
 
 ## First Steps
 
+> Mobile clients do not call these HTTP endpoints directly for project list and session start anymore. This branch moves those broker control operations onto Azure Web PubSub; the REST endpoints below remain for local admin/testing while the remaining live-session routing follow-up is completed.
+
 ### 1. Verify Broker is Running
 
 ```bash
@@ -64,5 +66,5 @@ See **[BROKER_SETUP.md](./BROKER_SETUP.md)** for detailed configuration, environ
 ## What's Next?
 
 - Review session lifecycle in the broker [Sessions guide](../src/SquadScout.Broker/Sessions/README.md) (if available).
-- Enable Azure Web PubSub for remote client routing.
+- Enable Azure Web PubSub for remote mobile routing and broker control messaging.
 - Run tests: `dotnet test SquadScout.slnx`.

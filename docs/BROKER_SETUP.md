@@ -2,7 +2,7 @@
 
 ## Overview
 
-The SquadScout Broker is a local .NET host that manages Copilot process I/O via a PTY (pseudo-terminal) interface, orchestrates sessions, and exposes REST APIs for local and remote clients. This guide covers contributor-facing setup and configuration for local development.
+The SquadScout Broker is a local .NET host that manages Copilot process I/O via a PTY (pseudo-terminal) interface, orchestrates sessions, and exposes local admin APIs. Mobile broker operations flow through Azure Web PubSub; the Azure Function is limited to authentication and Web PubSub token minting. This guide covers contributor-facing setup and configuration for local development.
 
 ## Prerequisites
 
@@ -43,7 +43,7 @@ dotnet run
 
 This launches:
 - **Broker** at `http://localhost:5071`
-- **Azure Functions** referencing broker
+- **Azure Functions** for auth/token negotiation only
 - **MAUI App** (Windows) with broker connection
 
 Aspire dashboard available at `http://localhost:18888` to monitor all services.
@@ -187,7 +187,7 @@ Returns `200 OK` if broker is running. Used by Aspire and load balancers.
 - **Register Project:** `POST /api/projects`
 - **List Projects:** `GET /api/projects`
 
-**Current behavior:** No GET by projectId endpoint exists. Projects are retrieved from the list endpoint.
+**Current behavior:** These are local admin/internal APIs. The MAUI app now requests project lists over the broker control channel on Azure Web PubSub instead of calling these endpoints directly. No GET by projectId endpoint exists. Projects are retrieved from the list endpoint.
 
 See `src/SquadScout.Broker/Program.cs` for endpoint definitions.
 
@@ -211,11 +211,11 @@ See `src/SquadScout.Broker/Program.cs` for endpoint definitions.
 - **Get Session Telemetry:** `GET /api/sessions/{sessionId}/telemetry`
   - Returns: Diagnostic snapshot including sequence state and message buffer (Phase 1)
 
-See `src/SquadScout.Broker/Program.cs` for endpoint implementations.
+See `src/SquadScout.Broker/Program.cs` for endpoint implementations. Project list, session start, and session status requests from the mobile app now use the Web PubSub broker control channel; live input still uses the current upstream bridge until the remaining direct session-routing work lands.
 
 ### WebSocket Support (Phase 2)
 
-**Phase 1 Status:** No WebSocket endpoints are implemented. Session output routing currently uses Azure Web PubSub publish for remote clients. Local clients poll session state or subscribe via Web PubSub client connections. Direct broker WebSocket support is deferred to Phase 2.
+**Phase 1 Status:** No broker-owned HTTP WebSocket endpoints are implemented. This branch moves mobile broker control requests (project list, session start, session status) onto Azure Web PubSub. Live session input still uses the current upstream bridge while the remaining direct session-routing work is completed.
 
 ## Project Registration
 

@@ -49,8 +49,9 @@ public static class MauiProgram
 		builder.Services.AddSingleton<IPubSubNegotiationClient, PubSubNegotiationClient>();
 		builder.Services.AddSingleton<IWebPubSubSocketFactory, ClientWebPubSubSocketFactory>();
 		builder.Services.AddSingleton<IMessageConnectionService, MessagingConnectionService>();
-		builder.Services.AddSingleton<IProjectCatalogService, BrokerProjectCatalogService>();
-		builder.Services.AddSingleton<ISessionLifecycleService, BrokerSessionLifecycleService>();
+		builder.Services.AddSingleton<BrokerControlChannelClient>();
+		builder.Services.AddSingleton<IProjectCatalogService, WebPubSubProjectCatalogService>();
+		builder.Services.AddSingleton<ISessionLifecycleService, WebPubSubSessionLifecycleService>();
 		builder.Services.AddSingleton<IActiveSessionState, ActiveSessionState>();
 		builder.Services.AddSingleton<ProjectSelectionViewModel>();
 		builder.Services.AddSingleton<ActiveSessionViewModel>();

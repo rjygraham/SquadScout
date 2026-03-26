@@ -1,6 +1,6 @@
 # SquadScout
 
-A local .NET broker that spawns and orchestrates GitHub Copilot, manages session I/O via PTY, and serves APIs for local and cloud-connected clients.
+A local .NET broker that spawns and orchestrates GitHub Copilot, manages session I/O via PTY, and uses Azure Web PubSub for remote mobile connectivity.
 
 ## Quick Links
 
@@ -82,16 +82,16 @@ GET /alive                        # Development only
 
 ```http
 POST /api/projects                # Register project
-GET /api/projects                 # List projects
+GET /api/projects                 # List projects (local admin/internal API)
 ```
 
 ### Sessions
 
 ```http
-POST /api/sessions                # Start session
-GET /api/sessions/{sessionId}     # Get session status
-POST /api/sessions/{sessionId}/stop   # Stop session
-POST /api/sessions/{sessionId}/input  # Send input to session
+POST /api/sessions                # Start session (local admin/internal API)
+GET /api/sessions/{sessionId}     # Get session status (local admin/internal API)
+POST /api/sessions/{sessionId}/stop   # Stop session (local admin/internal API)
+POST /api/sessions/{sessionId}/input  # Current upstream bridge for live input
 GET /api/sessions/{sessionId}/telemetry  # Get session diagnostics (Phase 1)
 ```
 
@@ -114,10 +114,10 @@ See [Broker Setup](./docs/BROKER_SETUP.md) for full configuration reference.
 
 ## Architecture
 
-- **Broker Host:** Local HTTP server exposing REST APIs.
+- **Broker Host:** Local HTTP server exposing admin/internal APIs.
 - **PTY Host:** Windows ConPTY wrapper for Copilot process lifecycle.
 - **Session Orchestration:** In-memory session state and message routing.
-- **Relay Integration:** Optional Azure Web PubSub for remote client messaging (publish-only in Phase 1).
+- **Relay Integration:** Azure Web PubSub is the mobile transport. This branch moves project list, session start, and session status onto a broker control channel over Web PubSub; live session input still uses the current upstream bridge pending the remaining direct session-routing work.
 - **Orleans (Phase 2):** Grain-based state distribution (currently disabled).
 
 ## Known Limitations (Phase 1)

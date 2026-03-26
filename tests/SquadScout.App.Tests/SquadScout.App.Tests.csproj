@@ -30,9 +30,10 @@
      <Compile Include="..\..\src\SquadScout.App\ViewModels\ActiveSessionViewModel.cs" Link="App\ViewModels\ActiveSessionViewModel.cs" />
      <Compile Include="..\..\src\SquadScout.App\ViewModels\SessionTranscriptState.cs" Link="App\ViewModels\SessionTranscriptState.cs" />
      <Compile Include="..\..\src\SquadScout.App\ViewModels\SessionTranscriptController.cs" Link="App\ViewModels\SessionTranscriptController.cs" />
-     <Compile Include="..\..\src\SquadScout.App\Services\PubSubNegotiationClient.cs" Link="App\Services\PubSubNegotiationClient.cs" />
-     <Compile Include="..\..\src\SquadScout.App\Services\WebPubSubSocketClient.cs" Link="App\Services\WebPubSubSocketClient.cs" />
-     <Compile Include="..\..\src\SquadScout.App\Services\MessagingConnectionService.cs" Link="App\Services\MessagingConnectionService.cs" />
-  </ItemGroup>
+      <Compile Include="..\..\src\SquadScout.App\Services\PubSubNegotiationClient.cs" Link="App\Services\PubSubNegotiationClient.cs" />
+      <Compile Include="..\..\src\SquadScout.App\Services\WebPubSubBrokerControlServices.cs" Link="App\Services\WebPubSubBrokerControlServices.cs" />
+      <Compile Include="..\..\src\SquadScout.App\Services\WebPubSubSocketClient.cs" Link="App\Services\WebPubSubSocketClient.cs" />
+      <Compile Include="..\..\src\SquadScout.App\Services\MessagingConnectionService.cs" Link="App\Services\MessagingConnectionService.cs" />
+   </ItemGroup>
 
 </Project>

@@ -1,6 +1,7 @@
 using SquadScout.Broker.Configuration;
 using SquadScout.Broker.Pty;
 using SquadScout.Broker.Projects;
+using SquadScout.Broker.Realtime;
 using SquadScout.Broker.Relay;
 using SquadScout.Broker.Sessions;
 using Azure.Messaging.WebPubSub;
@@ -65,6 +66,8 @@ builder.Services.AddSingleton<IRelayPublisher>(serviceProvider =>
 builder.Services.AddSingleton<ISessionRelay, InMemorySessionRelay>();
 builder.Services.AddSingleton<ISequenceValidator, SessionSequenceValidator>();
 builder.Services.AddSingleton<ISessionOrchestrator, InMemorySessionOrchestrator>();
+builder.Services.AddSingleton<BrokerControlMessageHandler>();
+builder.Services.AddHostedService<BrokerControlChannelService>();
 
 var app = builder.Build();
 if (app.Environment.IsDevelopment())
