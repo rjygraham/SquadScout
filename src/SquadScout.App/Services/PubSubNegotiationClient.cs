@@ -79,12 +79,40 @@ public sealed class PubSubNegotiationClient : IPubSubNegotiationClient
         if (negotiateResponse is null ||
             string.IsNullOrWhiteSpace(negotiateResponse.Url) ||
             string.IsNullOrWhiteSpace(negotiateResponse.Hub) ||
+            string.IsNullOrWhiteSpace(negotiateResponse.UserId) ||
             string.IsNullOrWhiteSpace(negotiateResponse.SessionGroup))
         {
             throw new InvalidOperationException("Negotiate completed, but the response did not contain a usable Web PubSub connection payload.");
         }
 
+        ValidateNegotiateResponse(session, negotiateResponse);
         return negotiateResponse;
+    }
+
+    private static void ValidateNegotiateResponse(SessionDescriptor session, PubSubNegotiateResponse negotiateResponse)
+    {
+        if (!string.Equals(negotiateResponse.ProjectId, session.ProjectId, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(negotiateResponse.SessionId, session.SessionId, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Negotiate completed, but the response targeted {negotiateResponse.ProjectId}/{negotiateResponse.SessionId} instead of {session.ProjectId}/{session.SessionId}.");
+        }
+
+        if (negotiateResponse.ParticipantKind != PubSubParticipantKind.Client)
+        {
+            throw new InvalidOperationException(
+                $"Negotiate completed, but the response granted '{negotiateResponse.ParticipantKind}' access instead of the expected client access.");
+        }
+
+        if (negotiateResponse.ExpiresAtUtc == default || negotiateResponse.RefreshAtUtc == default)
+        {
+            throw new InvalidOperationException("Negotiate completed, but the response did not include a usable token lifetime window.");
+        }
+
+        if (negotiateResponse.RefreshAtUtc >= negotiateResponse.ExpiresAtUtc)
+        {
+            throw new InvalidOperationException("Negotiate completed, but the token refresh window ends after the token expiry.");
+        }
     }
 
     private static async Task<string> TryReadErrorDetailAsync(HttpResponseMessage response, CancellationToken cancellationToken)
