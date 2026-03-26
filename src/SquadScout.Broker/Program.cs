@@ -63,13 +63,22 @@ if (orleansOptions.Enabled)
             primarySiloEndpoint: null,
             serviceId: orleansOptions.ServiceId,
             clusterId: orleansOptions.ClusterId);
-        siloBuilder.AddAdoNetGrainStorage(orleansOptions.StorageProvider, options =>
+        siloBuilder.AddAdoNetGrainStorage(OrleansHostOptions.DefaultStorageProvider, options =>
         {
             options.Invariant = bootstrapResult.Invariant;
             options.ConnectionString = bootstrapResult.ConnectionString;
         });
+
+        if (!string.Equals(orleansOptions.StorageProvider, OrleansHostOptions.DefaultStorageProvider, StringComparison.Ordinal))
+        {
+            siloBuilder.AddAdoNetGrainStorage(orleansOptions.StorageProvider, options =>
+            {
+                options.Invariant = bootstrapResult.Invariant;
+                options.ConnectionString = bootstrapResult.ConnectionString;
+            });
+        }
     });
-    orleansStatus = OrleansHostStatusSnapshot.BootstrapOnly(orleansOptions, bootstrapResult, compatibilityResult);
+    orleansStatus = OrleansHostStatusSnapshot.SessionGrains(orleansOptions, bootstrapResult, compatibilityResult);
 }
 else
 {
@@ -97,7 +106,15 @@ builder.Services.AddSingleton<IRelayPublisher>(serviceProvider =>
 });
 builder.Services.AddSingleton<ISessionRelay, InMemorySessionRelay>();
 builder.Services.AddSingleton<ISequenceValidator, SessionSequenceValidator>();
-builder.Services.AddSingleton<ISessionOrchestrator, InMemorySessionOrchestrator>();
+if (orleansOptions.Enabled)
+{
+    builder.Services.AddSingleton<ISessionGrainFactory, OrleansSessionGrainFactory>();
+    builder.Services.AddSingleton<ISessionOrchestrator, GrainBackedSessionOrchestrator>();
+}
+else
+{
+    builder.Services.AddSingleton<ISessionOrchestrator, InMemorySessionOrchestrator>();
+}
 builder.Services.AddSingleton<BrokerControlMessageHandler>();
 builder.Services.AddSingleton<WebPubSubUpstreamAuthenticator>();
 builder.Services.AddSingleton<WebPubSubUpstreamHandler>();

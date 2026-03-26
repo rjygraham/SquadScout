@@ -6,12 +6,22 @@ internal sealed class SessionTelemetryBuffer<T>
     private int _count;
     private int _nextWriteIndex;
 
-    public SessionTelemetryBuffer(int capacity)
+    public SessionTelemetryBuffer(int capacity, IEnumerable<T>? seedItems = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
 
         Capacity = capacity;
         _items = new T[capacity];
+
+        if (seedItems is null)
+        {
+            return;
+        }
+
+        foreach (var item in seedItems)
+        {
+            Append(item);
+        }
     }
 
     public int Capacity { get; }

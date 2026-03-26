@@ -75,4 +75,27 @@ public sealed class OrleansHostStatusSnapshot
             Summary = "Local Orleans silo is enabled with SQLite-backed ADO.NET storage. Session/project runtime ownership remains in-memory until the grain migration issues land.",
             Note = compatibilityResult.Note
         };
+
+    public static OrleansHostStatusSnapshot SessionGrains(
+        OrleansHostOptions options,
+        OrleansSchemaBootstrapResult bootstrapResult,
+        OrleansSqliteCompatibilityResult compatibilityResult) =>
+        new()
+        {
+            Enabled = true,
+            HostMode = "session-grains",
+            SessionStateMode = "durable-grain",
+            ClusterId = options.ClusterId,
+            ServiceId = options.ServiceId,
+            SiloPort = options.SiloPort,
+            GatewayPort = options.GatewayPort,
+            StorageProvider = options.StorageProvider,
+            Invariant = bootstrapResult.Invariant,
+            DatabasePath = bootstrapResult.DatabasePath,
+            SchemaReady = bootstrapResult.SchemaReady,
+            SchemaCreatedThisRun = bootstrapResult.SchemaCreatedThisRun,
+            CompatibilityShimApplied = compatibilityResult.Applied,
+            Summary = "Local Orleans silo owns durable session replay state. Project ownership and transport hosting stay on the broker runtime path until the remaining grain migrations land.",
+            Note = compatibilityResult.Note
+        };
 }
