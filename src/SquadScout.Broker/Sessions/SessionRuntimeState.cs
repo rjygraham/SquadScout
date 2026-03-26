@@ -19,6 +19,24 @@ internal sealed class SessionRuntimeState
         _recentEvents = new SessionTelemetryBuffer<SessionTelemetryEvent>(SessionDiagnosticsDefaults.RecentEventCapacity);
     }
 
+    public SessionRuntimeState(SessionRuntimePersistenceSnapshot snapshot, int replayBufferCapacity)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        Descriptor = snapshot.Descriptor;
+        Generation = snapshot.Generation;
+        NextBrokerSequence = snapshot.NextBrokerSequence;
+        LastClientSequence = snapshot.LastClientSequence;
+        AcknowledgedSequence = snapshot.AcknowledgedSequence;
+        _replayBuffer = new CircularReplayBuffer(replayBufferCapacity, snapshot.ReplayMessages);
+        _recentEnvelopes = new SessionTelemetryBuffer<SessionTelemetryEnvelope>(
+            SessionDiagnosticsDefaults.RecentEnvelopeCapacity,
+            snapshot.RecentEnvelopes);
+        _recentEvents = new SessionTelemetryBuffer<SessionTelemetryEvent>(
+            SessionDiagnosticsDefaults.RecentEventCapacity,
+            snapshot.RecentEvents);
+    }
+
     public SessionDescriptor Descriptor { get; private set; }
 
     public object SyncRoot { get; } = new();
@@ -56,6 +74,17 @@ internal sealed class SessionRuntimeState
             RecentEnvelopes = _recentEnvelopes.Snapshot(),
             RecentEvents = _recentEvents.Snapshot()
         };
+
+    public SessionRuntimePersistenceSnapshot ExportPersistenceSnapshot() =>
+        new(
+            Descriptor,
+            Generation,
+            NextBrokerSequence,
+            LastClientSequence,
+            AcknowledgedSequence,
+            _replayBuffer.Snapshot(),
+            _recentEnvelopes.Snapshot(),
+            _recentEvents.Snapshot());
 
     public void RecordSessionStarted(string? requestedBy)
     {

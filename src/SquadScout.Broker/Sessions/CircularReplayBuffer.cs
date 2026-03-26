@@ -9,12 +9,24 @@ public sealed class CircularReplayBuffer
     private int _count;
     private int _nextWriteIndex;
 
-    public CircularReplayBuffer(int capacity = SessionSequencingDefaults.ReplayBufferCapacity)
+    public CircularReplayBuffer(
+        int capacity = SessionSequencingDefaults.ReplayBufferCapacity,
+        IEnumerable<MessageEnvelope<JsonElement>>? seedMessages = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
 
         Capacity = capacity;
         _buffer = new MessageEnvelope<JsonElement>[capacity];
+
+        if (seedMessages is null)
+        {
+            return;
+        }
+
+        foreach (var message in seedMessages)
+        {
+            Append(message);
+        }
     }
 
     public int Capacity { get; }
@@ -124,4 +136,6 @@ public sealed class CircularReplayBuffer
 
         return orderedItems;
     }
+
+    public IReadOnlyList<MessageEnvelope<JsonElement>> Snapshot() => TryGetOrderedItems();
 }

@@ -1216,3 +1216,33 @@ Issue #18 lands as a **bootstrap-only Orleans host slice**:
 - `dotnet test .\SquadScout.slnx -nologo --no-build` ✅
 - `dotnet run --project .\src\SquadScout.Broker\SquadScout.Broker.csproj --no-launch-profile` with Orleans enabled + SQLite smoke configuration ✅
 - `GET http://127.0.0.1:5073/api/orleans/status` returned bootstrap-only + schema-ready + compatibility-shim-applied ✅
+
+## Link — Issue #19 Session Grain & Durable Replay State (2026-03-26)
+
+### Decision
+
+Issue #19 promotes broker session state from the Phase 1 in-memory registry into a **durable Orleans session grain runtime**:
+- keep PTY transport ownership in `ISessionRelay` / session host code
+- move replay buffer contents, generation sequencing, and cumulative acknowledgements into `ISessionGrain`
+- preserve the existing relay + pump surface so the broker datapath does not split into competing state owners
+
+### Rationale
+
+- This is the critical Phase 2 cutover after #18: restart-safe replay requires the replay window and generation metadata to survive broker process loss, but the live PTY handle still belongs above the grain boundary.
+- Reusing the Phase 1 relay avoids transport confusion: grains own durable ordering state, while the relay still owns start/stop/input serialization and active PTY lifecycle.
+- Persisting telemetry snapshots alongside replay metadata keeps the exported broker diagnostics useful after a grain reactivation without inventing a separate diagnostics store.
+
+### Implementation Notes
+
+- `src\SquadScout.Broker\Orleans\SessionGrainModels.cs` defines the persisted session descriptor, replay-envelope snapshots, validation results, and telemetry DTOs used by Orleans state storage.
+- `src\SquadScout.Broker\Orleans\SessionGrain.cs` loads/persists `SessionRuntimeState` through `IPersistentState<SessionGrainState>`, mapping grain activation/deactivation to runtime snapshot hydration instead of transport lifecycle ownership.
+- `src\SquadScout.Broker\Sessions\GrainBackedSessionOrchestrator.cs` preserves the existing `ISessionOrchestrator` contract, including the accepted-message callback gate, while delegating durable state transitions to the session grain.
+- `src\SquadScout.Broker\Program.cs` now aliases the configured SQLite storage under the default Orleans storage name, registers `ISessionGrainFactory`, and advertises `session-grains` / `durable-grain` via `/api/orleans/status` when Orleans is enabled.
+- `tests\SquadScout.Broker.Tests\OrleansSessionGrainTests.cs` exercises durable replay-window persistence, generation-reset boundaries, and relay compatibility using a restart-style grain factory harness.
+
+### Validation
+
+- `dotnet build .\SquadScout.slnx -nologo` ✅
+- `dotnet test .\SquadScout.slnx -nologo --no-build` ✅
+- `dotnet run --project .\src\SquadScout.Broker\SquadScout.Broker.csproj --no-build --no-launch-profile` with `Orleans__Enabled=true` and SQLite smoke settings ✅
+- `GET http://127.0.0.1:5075/api/orleans/status` returned `hostMode=session-grains`, `sessionStateMode=durable-grain`, and `schemaReady=true` ✅
