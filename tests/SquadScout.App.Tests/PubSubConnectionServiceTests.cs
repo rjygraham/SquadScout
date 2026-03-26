@@ -446,6 +446,69 @@ public sealed class PubSubConnectionServiceTests
     }
 
     [Fact]
+    public async Task ReplayResponseWithHasMoreAndEmptyPageRequestsAnotherPageBeforeRestoringConnectedStatus()
+    {
+        var session = CreateSession();
+        var socket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-empty-page-replay")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        await using var service = CreateService(new RecordingNegotiationClient(CreateNegotiationResponse(session)), socket);
+        await service.PrepareForSessionAsync(session, new MessageConnectionResumeState
+        {
+            Generation = SessionEnvelopeContract.InitialGeneration
+        });
+        await WaitForAsync(() => socket.SentTexts.Count >= 2);
+
+        socket.EnqueueIncoming(GroupMessage(CreateReplayResponseEnvelope(
+            session,
+            hasMore: true,
+            availableFromSequence: 1,
+            availableToSequence: 4,
+            messages: [])));
+        await WaitForAsync(() => socket.SentTexts.Count >= 3);
+
+        using (var secondReplayCommand = JsonDocument.Parse(socket.SentTexts[2]))
+        {
+            var secondReplayRequest = secondReplayCommand.RootElement.GetProperty("data")
+                .Deserialize<MessageEnvelope<ReplayRequestPayload>>(SessionMessageSerializer.DefaultOptions);
+
+            Assert.NotNull(secondReplayRequest);
+            Assert.Equal(ReplayRequestReason.ClientRecovery, secondReplayRequest!.Payload.Reason);
+            Assert.Equal(1, secondReplayRequest.Payload.FromSequenceInclusive);
+            Assert.Equal(4, secondReplayRequest.Payload.ToSequenceInclusive);
+        }
+
+        Assert.True(service.CurrentStatus.IsReplayPending);
+
+        socket.EnqueueIncoming(GroupMessage(CreateReplayResponseEnvelope(
+            session,
+            availableFromSequence: 1,
+            availableToSequence: 4,
+            messages:
+            [
+                ToJsonEnvelope(CreateBrokerEnvelope(session, sequence: 1)),
+                ToJsonEnvelope(CreateBrokerEnvelope(session, sequence: 2)),
+                ToJsonEnvelope(CreateBrokerEnvelope(session, sequence: 3)),
+                ToJsonEnvelope(CreateBrokerEnvelope(session, sequence: 4))
+            ])));
+        await WaitForAsync(() => service.CurrentStatus.State == MessageConnectionState.Connected && !service.CurrentStatus.IsReplayPending);
+
+        Assert.Equal(4, service.CurrentStatus.AcknowledgedSequence);
+        Assert.Contains(service.RecentTraffic, traffic => traffic.Direction == MessageTrafficDirection.Incoming && traffic.Envelope.Sequence == 4);
+    }
+
+    [Fact]
     public async Task PrepareForSessionAsyncSchedulesTokenRefreshBeforeRefreshAtUtc()
     {
         var session = CreateSession();

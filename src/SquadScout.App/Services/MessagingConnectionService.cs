@@ -620,12 +620,16 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 });
         }
 
-        if (payload.HasMore && payload.Messages.Count > 0 && payload.Messages[^1].Sequence is long nextFromExclusive)
+        if (payload.HasMore)
         {
+            var nextFromInclusive = payload.Messages.Count > 0 && payload.Messages[^1].Sequence is long nextFromExclusive
+                ? nextFromExclusive + 1
+                : GetNextReplayFromSequence();
+
             QueueReplayRequest(
                 replayReason,
                 cancellationToken,
-                fromSequenceInclusive: nextFromExclusive + 1,
+                fromSequenceInclusive: nextFromInclusive,
                 toSequenceInclusive: payload.AvailableToSequence,
                 publishReplayStatus: !payload.GapDetected);
             return true;
@@ -747,6 +751,14 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         lock (_stateSync)
         {
             return _gapDetected;
+        }
+    }
+
+    private long GetNextReplayFromSequence()
+    {
+        lock (_stateSync)
+        {
+            return (_acknowledgedSequence ?? 0) + 1;
         }
     }
 
