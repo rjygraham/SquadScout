@@ -50,7 +50,45 @@ public sealed class OrleansSessionGrainTests
         Assert.True(snapshot.Enabled);
         Assert.Equal("session-grains", snapshot.HostMode);
         Assert.Equal("durable-grain", snapshot.SessionStateMode);
+        Assert.Equal("in-memory", snapshot.ProjectStateMode);
         Assert.Contains("durable session replay state", snapshot.Summary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SessionProjectGrainStatusSnapshotReportsDurableProjectMode()
+    {
+        var snapshot = OrleansHostStatusSnapshot.SessionProjectGrains(
+            new OrleansHostOptions
+            {
+                Enabled = true,
+                ClusterId = "test-cluster",
+                ServiceId = "test-service",
+                SiloPort = 11111,
+                GatewayPort = 30000,
+                StorageProvider = OrleansHostOptions.DefaultStorageProvider,
+                AdoNetInvariant = OrleansHostOptions.DefaultAdoNetInvariant
+            },
+            new OrleansSchemaBootstrapResult
+            {
+                ConnectionString = "Data Source=.squadscout\\orleans\\tests.db;Mode=ReadWriteCreate;Cache=Shared",
+                Invariant = OrleansHostOptions.DefaultAdoNetInvariant,
+                DatabasePath = "D:\\GitHub\\SquadScout-20\\.squadscout\\orleans\\tests.db",
+                SchemaReady = true,
+                SchemaCreatedThisRun = false
+            },
+            new OrleansSqliteCompatibilityResult
+            {
+                ConfiguredInvariant = OrleansHostOptions.DefaultAdoNetInvariant,
+                Applied = true,
+                Note = "SQLite compatibility shim applied."
+            });
+
+        Assert.True(snapshot.Enabled);
+        Assert.Equal("session-project-grains", snapshot.HostMode);
+        Assert.Equal("durable-grain", snapshot.SessionStateMode);
+        Assert.Equal("durable-grain", snapshot.ProjectStateMode);
+        Assert.Contains("project registration catalog", snapshot.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("restart active sessions", snapshot.Note, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -242,7 +280,7 @@ public sealed class OrleansSessionGrainTests
                 await releaseFirstMessage.Task.ConfigureAwait(true);
             });
 
-        await firstAcceptedEntered.Task.ConfigureAwait(false);
+        await firstAcceptedEntered.Task;
 
         await orchestrator.RecordBrokerMessageAsync(
             session.SessionId,
@@ -290,13 +328,17 @@ public sealed class OrleansSessionGrainTests
     [Fact]
     public async Task RelayPipelineRemainsCompatibleWithGrainBackedSessionState()
     {
-        var projectCatalog = new InMemoryProjectCatalog();
-        await projectCatalog.UpsertAsync(new RegisteredProject
+        var phase1ProjectCatalog = new InMemoryProjectCatalog();
+        await phase1ProjectCatalog.UpsertAsync(new RegisteredProject
         {
             ProjectId = "broker",
             DisplayName = "Broker",
             RepositoryRoot = GetRepositoryRoot()
         });
+        var projectCatalog = new GrainBackedProjectCatalog(
+            new TestProjectGrainFactory(),
+            new TestProjectRegistryGrainFactory(),
+            phase1ProjectCatalog);
 
         var relayPublisher = new RecordingRelayPublisher();
         var orchestrator = new GrainBackedSessionOrchestrator(relayPublisher, new TestSessionGrainFactory());
@@ -342,6 +384,43 @@ public sealed class OrleansSessionGrainTests
             message => Assert.Equal(SessionMessageType.SessionLifecycle, message.MessageType),
             message => Assert.Equal(SessionMessageType.Output, message.MessageType),
             message => Assert.Equal(SessionMessageType.SessionLifecycle, message.MessageType));
+    }
+
+    [Fact]
+    public async Task GrainBackedProjectCatalogImportsPhase1ProjectsAndPersistsAcrossReactivation()
+    {
+        var phase1Catalog = new InMemoryProjectCatalog();
+        await phase1Catalog.UpsertAsync(new RegisteredProject
+        {
+            ProjectId = "broker",
+            DisplayName = "Broker",
+            RepositoryRoot = GetRepositoryRoot()
+        });
+
+        var projectGrainFactory = new TestProjectGrainFactory();
+        var projectRegistryGrainFactory = new TestProjectRegistryGrainFactory();
+        var firstCatalog = new GrainBackedProjectCatalog(projectGrainFactory, projectRegistryGrainFactory, phase1Catalog);
+
+        var importedProject = await firstCatalog.GetAsync("broker");
+        await firstCatalog.UpsertAsync(new RegisteredProject
+        {
+            ProjectId = "mobile",
+            DisplayName = "Mobile",
+            RepositoryRoot = GetRepositoryRoot()
+        });
+
+        var secondCatalog = new GrainBackedProjectCatalog(
+            projectGrainFactory,
+            projectRegistryGrainFactory,
+            new InMemoryProjectCatalog());
+        var persistedProjects = await secondCatalog.ListAsync();
+
+        Assert.NotNull(importedProject);
+        Assert.Equal("broker", importedProject!.ProjectId);
+        Assert.Collection(
+            persistedProjects.OrderBy(project => project.DisplayName, StringComparer.OrdinalIgnoreCase),
+            project => Assert.Equal("broker", project.ProjectId),
+            project => Assert.Equal("mobile", project.ProjectId));
     }
 
     private static BrokerEnvelopeCommand<TPayload> CreateBrokerCommand<TPayload>(
@@ -420,6 +499,14 @@ public sealed class OrleansSessionGrainTests
         return gates.Count;
     }
 
+    private static RegisteredProjectRecord CloneProject(RegisteredProjectRecord source) =>
+        new()
+        {
+            ProjectId = source.ProjectId,
+            DisplayName = source.DisplayName,
+            RepositoryRoot = source.RepositoryRoot
+        };
+
     private sealed class TestSessionGrainFactory : ISessionGrainFactory
     {
         private readonly ConcurrentDictionary<string, TestPersistentState> _states = new(StringComparer.OrdinalIgnoreCase);
@@ -429,6 +516,24 @@ public sealed class OrleansSessionGrainTests
             var persistentState = _states.GetOrAdd(sessionId, static _ => new TestPersistentState());
             return new SessionGrain(persistentState);
         }
+    }
+
+    private sealed class TestProjectGrainFactory : IProjectGrainFactory
+    {
+        private readonly ConcurrentDictionary<string, TestProjectPersistentState> _states = new(StringComparer.OrdinalIgnoreCase);
+
+        public IProjectGrain GetGrain(string projectId)
+        {
+            var persistentState = _states.GetOrAdd(projectId, static _ => new TestProjectPersistentState());
+            return new ProjectGrain(persistentState);
+        }
+    }
+
+    private sealed class TestProjectRegistryGrainFactory : IProjectRegistryGrainFactory
+    {
+        private readonly TestProjectRegistryPersistentState _persistentState = new();
+
+        public IProjectRegistryGrain GetGrain() => new ProjectRegistryGrain(_persistentState);
     }
 
     private sealed class TestPersistentState : IPersistentState<SessionGrainState>
@@ -587,6 +692,154 @@ public sealed class OrleansSessionGrainTests
                 HasMore = source.HasMore,
                 IsComplete = source.IsComplete,
                 Reason = source.Reason
+            };
+    }
+
+    private sealed class TestProjectPersistentState : IPersistentState<ProjectGrainState>
+    {
+        private readonly object _syncRoot = new();
+        private ProjectGrainState _storedState = new();
+        private bool _recordExists;
+
+        public string Etag { get; set; } = string.Empty;
+
+        public bool RecordExists
+        {
+            get
+            {
+                lock (_syncRoot)
+                {
+                    return _recordExists;
+                }
+            }
+        }
+
+        public ProjectGrainState State { get; set; } = new();
+
+        public Task ClearStateAsync() => ClearStateAsync(CancellationToken.None);
+
+        public Task ClearStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_syncRoot)
+            {
+                _storedState = new ProjectGrainState();
+                State = new ProjectGrainState();
+                _recordExists = false;
+                Etag = string.Empty;
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task ReadStateAsync() => ReadStateAsync(CancellationToken.None);
+
+        public Task ReadStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_syncRoot)
+            {
+                State = Clone(_storedState);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task WriteStateAsync() => WriteStateAsync(CancellationToken.None);
+
+        public Task WriteStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_syncRoot)
+            {
+                _storedState = Clone(State);
+                _recordExists = true;
+                Etag = Guid.NewGuid().ToString("n");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        private static ProjectGrainState Clone(ProjectGrainState source) =>
+            new()
+            {
+                Project = source.Project is null
+                    ? null
+                    : CloneProject(source.Project)
+            };
+    }
+
+    private sealed class TestProjectRegistryPersistentState : IPersistentState<ProjectRegistryGrainState>
+    {
+        private readonly object _syncRoot = new();
+        private ProjectRegistryGrainState _storedState = new();
+        private bool _recordExists;
+
+        public string Etag { get; set; } = string.Empty;
+
+        public bool RecordExists
+        {
+            get
+            {
+                lock (_syncRoot)
+                {
+                    return _recordExists;
+                }
+            }
+        }
+
+        public ProjectRegistryGrainState State { get; set; } = new();
+
+        public Task ClearStateAsync() => ClearStateAsync(CancellationToken.None);
+
+        public Task ClearStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_syncRoot)
+            {
+                _storedState = new ProjectRegistryGrainState();
+                State = new ProjectRegistryGrainState();
+                _recordExists = false;
+                Etag = string.Empty;
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task ReadStateAsync() => ReadStateAsync(CancellationToken.None);
+
+        public Task ReadStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_syncRoot)
+            {
+                State = Clone(_storedState);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task WriteStateAsync() => WriteStateAsync(CancellationToken.None);
+
+        public Task WriteStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_syncRoot)
+            {
+                _storedState = Clone(State);
+                _recordExists = true;
+                Etag = Guid.NewGuid().ToString("n");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        private static ProjectRegistryGrainState Clone(ProjectRegistryGrainState source) =>
+            new()
+            {
+                Projects = source.Projects.Select(CloneProject).ToList(),
+                Phase1SeedImported = source.Phase1SeedImported,
+                Phase1SeedImportedAtUtc = source.Phase1SeedImportedAtUtc
             };
     }
 }

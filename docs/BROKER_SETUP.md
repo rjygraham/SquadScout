@@ -27,7 +27,7 @@ dotnet run --launch-profile Development
 
 **Defaults (appsettings.json):**
 - **Listen URL:** `http://127.0.0.1:5071`
-- **Project Registry:** `.squadscout/projects.json` (in-memory, not persisted)
+- **Project Registry Setting:** `.squadscout/projects.json` (reserved configuration key; the broker uses the Phase 1 in-memory catalog when Orleans is disabled and durable project grains when Orleans is enabled)
 - **Copilot Executable:** `copilot` (from PATH)
 - **PTY Buffer:** 1024 characters; 30 rows × 120 columns
 - **Azure Web PubSub:** Disabled (empty ConnectionString)
@@ -68,7 +68,7 @@ All broker settings are **environment-driven** via `appsettings.json` and overri
 | Setting | Type | Default | Notes |
 |---------|------|---------|-------|
 | `ListenUrl` | string | `http://127.0.0.1:5071` | HTTP server bind address. Use `http://localhost:5071` for remote calls; `http://127.0.0.1:5071` restricts to loopback. |
-| `ProjectRegistryPath` | string | `.squadscout\projects.json` | Relative path for persisting registered projects. Not yet implemented; in-memory catalog used. |
+| `ProjectRegistryPath` | string | `.squadscout\projects.json` | Reserved migration setting for the Phase 1 project registry path. Current runtime behavior is mode-driven: in-memory catalog when Orleans is disabled, durable project grains when Orleans is enabled. |
 
 **Override at runtime:**
 
@@ -164,17 +164,26 @@ dotnet run \
 - No publish to remote clients (NullRelayPublisher used).
 - Suitable for local testing and debugging.
 
-### Orleans (Phase 2 — Currently Disabled)
+### Orleans (Phase 2 — Durable Metadata)
 
 ```json
 {
   "Orleans": {
-    "Enabled": false
+    "Enabled": true
   }
 }
 ```
 
-Orleans-based session grain distribution is not yet implemented. Leave `Enabled: false` for Phase 1.
+When `Orleans:Enabled=true`, the broker starts a local silo and stores:
+
+- **Session metadata + replay state** in durable session grains
+- **Project registrations** in durable project grains plus a persisted registry grain
+
+Compatibility constraints during cutover:
+
+- **PTY ownership stays outside grains.** Durable metadata does not revive live Copilot PTY processes.
+- **Drain or restart running sessions before toggling Orleans mode.** Session descriptors and project registrations persist, but active transports still require a fresh broker-owned start.
+- **Phase 1 bridge:** if the current broker process already seeded the in-memory project catalog, the Orleans-backed catalog imports those registrations on first durable access so local admin/testing flows can cut over without losing project metadata mid-process.
 
 ## Endpoints
 
@@ -248,8 +257,9 @@ curl -X POST http://127.0.0.1:5071/api/projects \
 ```
 
 **Current behavior:**
-- Projects stored **in-memory** (lost on broker restart).
-- `ProjectRegistryPath` not yet implemented; Phase 2 will add persistent storage.
+- With **Orleans disabled**, projects stay **in-memory** and are lost on broker restart.
+- With **Orleans enabled**, project registrations persist in the Orleans SQLite store and the broker imports any already-seeded Phase 1 in-memory registrations on first access inside the same process.
+- `ProjectRegistryPath` remains a reserved compatibility setting; the durable path now lives in Orleans grain storage.
 
 ## Local Development Workflow
 
@@ -392,18 +402,17 @@ Or inline:
 Broker__ListenUrl="http://localhost:5072" dotnet run
 ```
 
-## Known Limitations (Phase 1)
+## Known Limitations
 
-- **No Persistent Project Registry:** Projects are lost when broker restarts. Use registration API or AppHost to re-register.
 - **Single Session Per Project:** Multi-concurrent sessions per project not supported; deferred to Phase 2.
 - **In-Memory Relay Only:** Without Web PubSub, session data is not routed to remote clients.
 - **Windows ConPTY Only:** POSIX TTY (Linux/macOS) support deferred.
 - **No Graceful Shutdown:** Ctrl+C stops immediately; process cleanup is basic. Full shutdown flow planned for Phase 3.
-- **Orleans Disabled:** Grain-based orchestration not ready; in-memory session state used.
+- **Mode Toggle Requires Session Restart:** Durable project/session metadata does not revive live PTY transports. Restart active sessions after switching `Orleans:Enabled`.
 
 ## Next Steps
 
-- **Phase 2:** Persistent project registry, multi-session support, Orleans integration.
+- **Phase 2:** Multi-session support, reconnect/liveness hardening, and broader grain validation.
 - **Phase 3:** Graceful shutdown, advanced observability, POSIX TTY support.
 - **Phase 4:** Windows Service / systemd deployment, advanced scaling.
 
