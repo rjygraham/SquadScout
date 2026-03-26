@@ -1,4 +1,6 @@
+using System.Text.Json;
 using SquadScout.App.Services;
+using SquadScout.Contracts.Messages;
 using SquadScout.Contracts.Sessions;
 
 namespace SquadScout.App.ViewModels;
@@ -7,6 +9,7 @@ public sealed class SessionTranscriptController
 {
     private static readonly TimeSpan GroupWindow = TimeSpan.FromMinutes(5);
 
+    private readonly HashSet<string> _appliedTrafficKeys = new(StringComparer.Ordinal);
     private readonly List<TranscriptMessageState> _messages = [];
     private readonly Func<DateTimeOffset> _utcNow;
 
@@ -22,7 +25,8 @@ public sealed class SessionTranscriptController
         ActiveSessionSnapshot snapshot,
         MessageConnectionStatus connectionStatus,
         string authorDisplayName,
-        string draft)
+        string draft,
+        bool appendDraftMessage = true)
     {
         if (!snapshot.HasActiveSession || snapshot.Session is null)
         {
@@ -63,19 +67,21 @@ public sealed class SessionTranscriptController
         }
 
         EnsureSession(snapshot);
-
-        AppendMessage(
-            TranscriptMessageSpeaker.LocalUser,
-            string.IsNullOrWhiteSpace(authorDisplayName) ? "You" : authorDisplayName.Trim(),
-            normalizedDraft,
-            isError: false,
-            isSystem: false);
+        if (appendDraftMessage)
+        {
+            AppendMessage(
+                TranscriptMessageSpeaker.LocalUser,
+                string.IsNullOrWhiteSpace(authorDisplayName) ? "You" : authorDisplayName.Trim(),
+                normalizedDraft,
+                isError: false,
+                isSystem: false);
+        }
 
         var statusMessage = connectionStatus.SupportsLiveSessionStream && connectionStatus.State == MessageConnectionState.Connected
             ? "Sent the message to the live session stream."
             : snapshot.Source == SessionActivationSource.DevelopmentFallback
                 ? "Captured the message in the offline transcript preview."
-                : "Captured the message in the native transcript preview while live streaming lands in #11.";
+                : "Captured the message in the native transcript preview while live delivery is unavailable.";
 
         return new TranscriptSendResult(
             Success: true,
@@ -84,24 +90,55 @@ public sealed class SessionTranscriptController
             ViewState: BuildViewState(snapshot, connectionStatus));
     }
 
+    public SessionTranscriptViewState RestoreFromTraffic(
+        ActiveSessionSnapshot snapshot,
+        MessageConnectionStatus connectionStatus,
+        IReadOnlyList<MessageEnvelopeTraffic> trafficHistory)
+    {
+        if (!snapshot.HasActiveSession || snapshot.Session is null)
+        {
+            ResetSessionState();
+            return BuildViewState(snapshot, connectionStatus);
+        }
+
+        EnsureSession(snapshot, clearMessages: true);
+        foreach (var traffic in trafficHistory)
+        {
+            ApplyTraffic(snapshot, traffic);
+        }
+
+        return BuildViewState(snapshot, connectionStatus);
+    }
+
+    public SessionTranscriptViewState ObserveTraffic(
+        ActiveSessionSnapshot snapshot,
+        MessageConnectionStatus connectionStatus,
+        MessageEnvelopeTraffic traffic)
+    {
+        if (!snapshot.HasActiveSession || snapshot.Session is null)
+        {
+            return BuildViewState(snapshot, connectionStatus);
+        }
+
+        EnsureSession(snapshot);
+        ApplyTraffic(snapshot, traffic);
+        return BuildViewState(snapshot, connectionStatus);
+    }
+
     public SessionTranscriptViewState Sync(
         ActiveSessionSnapshot snapshot,
         MessageConnectionStatus connectionStatus)
     {
         if (!snapshot.HasActiveSession || snapshot.Session is null)
         {
-            _sessionKey = null;
-            _trackedState = null;
-            _messages.Clear();
+            ResetSessionState();
             return BuildViewState(snapshot, connectionStatus);
         }
 
         var nextSessionKey = CreateSessionKey(snapshot);
         if (!string.Equals(_sessionKey, nextSessionKey, StringComparison.Ordinal))
         {
-            _messages.Clear();
-            _sessionKey = nextSessionKey;
-            _trackedState = snapshot.Session.State;
+            EnsureSession(snapshot, clearMessages: true);
             return BuildViewState(snapshot, connectionStatus);
         }
 
@@ -114,13 +151,172 @@ public sealed class SessionTranscriptController
         return BuildViewState(snapshot, connectionStatus);
     }
 
-    private void AppendLifecycleMessage(SessionState sessionState)
+    private void ApplyTraffic(ActiveSessionSnapshot snapshot, MessageEnvelopeTraffic traffic)
+    {
+        if (!MatchesSession(snapshot, traffic.Envelope))
+        {
+            return;
+        }
+
+        var trafficKey = CreateTrafficKey(traffic);
+        if (!string.IsNullOrWhiteSpace(trafficKey) && !_appliedTrafficKeys.Add(trafficKey))
+        {
+            return;
+        }
+
+        switch (traffic.Direction, traffic.Envelope.MessageType)
+        {
+            case (MessageTrafficDirection.Outgoing, SessionMessageType.Input):
+                TryAppendOutgoingInput(traffic.Envelope);
+                break;
+
+            case (MessageTrafficDirection.Outgoing, SessionMessageType.ReplayRequest):
+                TryAppendReplayRequest(traffic.Envelope);
+                break;
+
+            case (MessageTrafficDirection.Incoming, SessionMessageType.Output):
+                TryAppendIncomingOutput(traffic.Envelope);
+                break;
+
+            case (MessageTrafficDirection.Incoming, SessionMessageType.SessionLifecycle):
+                TryAppendLifecycleEnvelope(traffic.Envelope);
+                break;
+
+            case (MessageTrafficDirection.Incoming, SessionMessageType.ReplayResponse):
+                TryAppendReplayResponse(traffic.Envelope);
+                break;
+        }
+    }
+
+    private void TryAppendOutgoingInput(MessageEnvelope<JsonElement> envelope)
+    {
+        var payload = envelope.Payload.Deserialize<InputChunkPayload>(SessionMessageSerializer.DefaultOptions);
+        if (payload is null || string.IsNullOrWhiteSpace(payload.Content))
+        {
+            return;
+        }
+
+        AppendMessage(
+            TranscriptMessageSpeaker.LocalUser,
+            "You",
+            payload.Content.Trim(),
+            isError: false,
+            isSystem: false);
+    }
+
+    private void TryAppendIncomingOutput(MessageEnvelope<JsonElement> envelope)
+    {
+        var payload = envelope.Payload.Deserialize<OutputChunkPayload>(SessionMessageSerializer.DefaultOptions);
+        if (payload is null || string.IsNullOrWhiteSpace(payload.Content))
+        {
+            return;
+        }
+
+        AppendMessage(
+            TranscriptMessageSpeaker.RemoteAgent,
+            "SquadScout",
+            payload.Content,
+            payload.IsError,
+            isSystem: false);
+    }
+
+    private void TryAppendLifecycleEnvelope(MessageEnvelope<JsonElement> envelope)
+    {
+        var payload = envelope.Payload.Deserialize<SessionLifecyclePayload>(SessionMessageSerializer.DefaultOptions);
+        if (payload is null)
+        {
+            return;
+        }
+
+        AppendLifecycleMessage(payload.State, payload.Reason);
+        _trackedState = payload.State;
+    }
+
+    private void TryAppendReplayRequest(MessageEnvelope<JsonElement> envelope)
+    {
+        var payload = envelope.Payload.Deserialize<ReplayRequestPayload>(SessionMessageSerializer.DefaultOptions);
+        if (payload is null)
+        {
+            return;
+        }
+
+        var reasonText = payload.Reason switch
+        {
+            ReplayRequestReason.ClientRecovery => "Resuming this session from the device cache.",
+            ReplayRequestReason.ReconnectResume => "Reconnected to the broker.",
+            _ => "Transcript continuity was interrupted."
+        };
+
+        AppendMessage(
+            TranscriptMessageSpeaker.System,
+            "SquadScout",
+            $"{reasonText} Recovering transcript messages from sequence {payload.FromSequenceInclusive}.",
+            isError: false,
+            isSystem: true);
+    }
+
+    private void TryAppendReplayResponse(MessageEnvelope<JsonElement> envelope)
+    {
+        var payload = envelope.Payload.Deserialize<ReplayResponsePayload>(SessionMessageSerializer.DefaultOptions);
+        if (payload is null)
+        {
+            return;
+        }
+
+        if (payload.GapDetected)
+        {
+            var windowText = payload.AvailableFromSequence is long availableFrom && payload.AvailableToSequence is long availableTo
+                ? $" Available replay window: {availableFrom}-{availableTo}."
+                : string.Empty;
+
+            AppendMessage(
+                TranscriptMessageSpeaker.System,
+                "SquadScout",
+                $"Replay could not fully recover the transcript. Some context is no longer available from the broker.{windowText}",
+                isError: true,
+                isSystem: true);
+            return;
+        }
+
+        if (payload.HasMore)
+        {
+            AppendMessage(
+                TranscriptMessageSpeaker.System,
+                "SquadScout",
+                $"Recovered {payload.Messages.Count} transcript message(s). Loading more from the broker…",
+                isError: false,
+                isSystem: true);
+            return;
+        }
+
+        if (payload.Messages.Count > 0)
+        {
+            AppendMessage(
+                TranscriptMessageSpeaker.System,
+                "SquadScout",
+                $"Recovered {payload.Messages.Count} transcript message(s). Live continuity is restored.",
+                isError: false,
+                isSystem: true);
+            return;
+        }
+
+        AppendMessage(
+            TranscriptMessageSpeaker.System,
+            "SquadScout",
+            "The session is current. No transcript replay was needed.",
+            isError: false,
+            isSystem: true);
+    }
+
+    private void AppendLifecycleMessage(SessionState sessionState, string? reason = null)
     {
         var text = sessionState switch
         {
             SessionState.Pending => "The broker created the session. New transcript activity will appear here when it starts flowing.",
             SessionState.Running => "The session is running. Incoming replies will stack here in chat form.",
-            SessionState.Stopped => "The session has ended. Review the transcript here, but sending is disabled.",
+            SessionState.Stopped when string.IsNullOrWhiteSpace(reason) =>
+                "The session has ended. Review the transcript here, but sending is disabled.",
+            SessionState.Stopped => $"The session has ended. {reason}".Trim(),
             _ => "The session state changed."
         };
 
@@ -214,8 +410,17 @@ public sealed class SessionTranscriptController
         {
             banners.Add(new TranscriptBannerState(
                 "Transcript preview",
-                "This screen is wired for native chat UX now; PubSub-backed live delivery lands in #11.",
+                "This screen keeps the native chat UX even when live delivery is unavailable.",
                 TranscriptBannerSeverity.Info));
+        }
+        else if (connectionStatus.IsReplayPending)
+        {
+            banners.Add(new TranscriptBannerState(
+                connectionStatus.ReplayReason == ReplayRequestReason.ClientRecovery
+                    ? "Resuming saved session"
+                    : "Recovering transcript",
+                connectionStatus.Summary,
+                TranscriptBannerSeverity.Warning));
         }
         else if (connectionStatus.State != MessageConnectionState.Connected)
         {
@@ -230,6 +435,15 @@ public sealed class SessionTranscriptController
                 connectionStatus.State == MessageConnectionState.Faulted
                     ? TranscriptBannerSeverity.Error
                     : TranscriptBannerSeverity.Warning));
+        }
+
+        if (connectionStatus.ReplayAvailableFromSequence is long availableFrom &&
+            connectionStatus.ReplayAvailableToSequence is long availableTo)
+        {
+            banners.Add(new TranscriptBannerState(
+                "Replay gap detected",
+                $"The broker can only replay messages {availableFrom}-{availableTo}. Earlier context must be treated as missing.",
+                TranscriptBannerSeverity.Error));
         }
 
         if (snapshot.Source == SessionActivationSource.DevelopmentFallback)
@@ -282,12 +496,17 @@ public sealed class SessionTranscriptController
 
         if (!connectionStatus.SupportsLiveSessionStream)
         {
-            return "Send a message to preview the chat timeline while live PubSub delivery lands in #11.";
+            return "Send a message to preview the chat timeline while live delivery is unavailable.";
         }
 
         if (snapshot.Session?.State == SessionState.Pending)
         {
             return "The broker is still starting this session. Messaging unlocks once the live session is running.";
+        }
+
+        if (connectionStatus.IsReplayPending)
+        {
+            return "Replaying recent messages from the broker before trusting transcript continuity.";
         }
 
         if (connectionStatus.State != MessageConnectionState.Connected)
@@ -349,6 +568,11 @@ public sealed class SessionTranscriptController
             return null;
         }
 
+        if (connectionStatus.IsReplayPending)
+        {
+            return "Live messaging is recovering transcript continuity. Wait for replay to finish before sending.";
+        }
+
         if (snapshot.Session.State == SessionState.Pending)
         {
             return "Wait for the broker to start the session before sending messages.";
@@ -366,16 +590,61 @@ public sealed class SessionTranscriptController
         };
     }
 
-    private void EnsureSession(ActiveSessionSnapshot snapshot)
+    private void EnsureSession(ActiveSessionSnapshot snapshot, bool clearMessages = false)
     {
         var nextSessionKey = CreateSessionKey(snapshot);
         if (string.Equals(_sessionKey, nextSessionKey, StringComparison.Ordinal))
         {
+            if (clearMessages)
+            {
+                _messages.Clear();
+                _appliedTrafficKeys.Clear();
+                _trackedState = snapshot.Session!.State;
+            }
+
             return;
         }
 
         _messages.Clear();
+        _appliedTrafficKeys.Clear();
         _sessionKey = nextSessionKey;
         _trackedState = snapshot.Session!.State;
+    }
+
+    private void ResetSessionState()
+    {
+        _sessionKey = null;
+        _trackedState = null;
+        _messages.Clear();
+        _appliedTrafficKeys.Clear();
+    }
+
+    private static bool MatchesSession(ActiveSessionSnapshot snapshot, MessageEnvelope<JsonElement> envelope) =>
+        snapshot.Project is not null &&
+        snapshot.Session is not null &&
+        string.Equals(snapshot.Project.ProjectId, envelope.ProjectId, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(snapshot.Session.SessionId, envelope.SessionId, StringComparison.OrdinalIgnoreCase);
+
+    private static string? CreateTrafficKey(MessageEnvelopeTraffic traffic)
+    {
+        var envelope = traffic.Envelope;
+        if (!string.IsNullOrWhiteSpace(envelope.MessageId))
+        {
+            return $"{traffic.Direction}:{envelope.MessageType}:{envelope.MessageId}";
+        }
+
+        if (envelope.Direction == MessageDirection.BrokerToClient &&
+            envelope.Sequence is long sequence)
+        {
+            return $"{traffic.Direction}:{envelope.MessageType}:{envelope.Generation}:{sequence}";
+        }
+
+        if (envelope.Direction == MessageDirection.ClientToBroker &&
+            envelope.ClientSequence is long clientSequence)
+        {
+            return $"{traffic.Direction}:{envelope.MessageType}:{clientSequence}";
+        }
+
+        return null;
     }
 }

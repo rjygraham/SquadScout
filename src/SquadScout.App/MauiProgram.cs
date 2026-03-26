@@ -49,6 +49,10 @@ public static class MauiProgram
 		builder.Services.AddSingleton<IPubSubNegotiationClient, PubSubNegotiationClient>();
 		builder.Services.AddSingleton<IWebPubSubSocketFactory, ClientWebPubSubSocketFactory>();
 		builder.Services.AddSingleton<IMessageConnectionService, MessagingConnectionService>();
+		builder.Services.AddSingleton<ISessionResumeService>(services =>
+			new SessionResumeService(
+				Path.Combine(FileSystem.Current.AppDataDirectory, "session-resume", "active-session.json"),
+				services.GetRequiredService<IActiveSessionState>()));
 		builder.Services.AddSingleton<BrokerControlChannelClient>();
 		builder.Services.AddSingleton<IProjectCatalogService, WebPubSubProjectCatalogService>();
 		builder.Services.AddSingleton<ISessionLifecycleService, WebPubSubSessionLifecycleService>();

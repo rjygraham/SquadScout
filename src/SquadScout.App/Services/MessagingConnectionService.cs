@@ -98,7 +98,10 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         }
     }
 
-    public async Task<MessageConnectionStatus> PrepareForSessionAsync(SessionDescriptor session, CancellationToken cancellationToken = default)
+    public async Task<MessageConnectionStatus> PrepareForSessionAsync(
+        SessionDescriptor session,
+        MessageConnectionResumeState? resumeState = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(session);
         cancellationToken.ThrowIfCancellationRequested();
@@ -112,6 +115,11 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 await CleanupTransportAsync(cancellationToken).ConfigureAwait(false);
                 SetActiveSession(session);
                 ResetTransportState(clearTraffic: true);
+            }
+
+            if (resumeState is not null)
+            {
+                RestoreBrokerOrderingStateLocked(resumeState);
             }
 
             if (!_messagingOptions.AutoPrepareOnSessionStart)
@@ -131,7 +139,12 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 return CurrentStatus;
             }
 
-            return await ConnectCoreAsync(isReconnect: false, reconnectAttempt: 0, cancellationToken).ConfigureAwait(false);
+            return await ConnectCoreAsync(
+                    isReconnect: resumeState is not null,
+                    reconnectAttempt: 0,
+                    cancellationToken,
+                    initialReplayReason: resumeState is not null ? ReplayRequestReason.ClientRecovery : null)
+                .ConfigureAwait(false);
         }
         finally
         {
@@ -255,7 +268,8 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         CancellationToken cancellationToken,
         PubSubNegotiateResponse? negotiationOverride = null,
         bool publishTransitionStatus = true,
-        string? failureReasonPrefix = null)
+        string? failureReasonPrefix = null,
+        ReplayRequestReason? initialReplayReason = null)
     {
         var session = GetActiveSession()
             ?? throw new InvalidOperationException("An active session is required before live messaging can connect.");
@@ -265,10 +279,12 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         if (publishTransitionStatus)
         {
             PublishStatus(
-                new MessageConnectionStatus
+                CreateStatusWithOrderingState(new MessageConnectionStatus
                 {
                     State = isReconnect ? MessageConnectionState.Reconnecting : MessageConnectionState.Connecting,
-                    Summary = isReconnect
+                    Summary = initialReplayReason == ReplayRequestReason.ClientRecovery
+                        ? $"Restoring session '{session.SessionId}' from this device."
+                        : isReconnect
                         ? $"Retrying live messaging for session '{session.SessionId}'."
                         : $"Connecting live messaging for session '{session.SessionId}'.",
                     Hub = _messagingOptions.Hub,
@@ -276,7 +292,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                     ProjectId = session.ProjectId,
                     SessionId = session.SessionId,
                     ReconnectAttempt = reconnectAttempt
-                });
+                }));
         }
 
         try
@@ -312,10 +328,12 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 _connectionId = connectionId;
             }
 
-            var status = new MessageConnectionStatus
+            var status = CreateStatusWithOrderingState(new MessageConnectionStatus
             {
                 State = MessageConnectionState.Connected,
-                Summary = isReconnect
+                Summary = initialReplayReason == ReplayRequestReason.ClientRecovery
+                    ? $"Resumed live messaging for session '{session.SessionId}' on hub '{negotiation.Hub}'."
+                    : isReconnect
                     ? $"Live messaging reconnected for session '{session.SessionId}' on hub '{negotiation.Hub}'."
                     : $"Live messaging connected for session '{session.SessionId}' on hub '{negotiation.Hub}'.",
                 Hub = negotiation.Hub,
@@ -327,14 +345,14 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 ConnectedAtUtc = _utcNow(),
                 RefreshAtUtc = negotiation.RefreshAtUtc,
                 ReconnectAttempt = reconnectAttempt
-            };
+            });
 
             PublishStatus(status);
             ScheduleTokenRefresh(negotiation);
-            if (isReconnect)
+            if (initialReplayReason is not null || isReconnect)
             {
                 await RequestReplayAsync(
-                        ReplayRequestReason.ReconnectResume,
+                        initialReplayReason ?? ReplayRequestReason.ReconnectResume,
                         operationGateHeld: true,
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -571,6 +589,8 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             PublishStatus(CreateReplayGapWarningStatus(envelope.SessionId, payload));
         }
 
+        var replayReason = CurrentStatus.ReplayReason ?? ReplayRequestReason.GapDetected;
+
         foreach (var replayedEnvelope in payload.Messages)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -598,6 +618,17 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                     ObservedAtUtc = DateTimeOffset.UtcNow,
                     Summary = $"Applied replayed {replayedEnvelope.MessageType} for session '{replayedEnvelope.SessionId}'."
                 });
+        }
+
+        if (payload.HasMore && payload.Messages.Count > 0 && payload.Messages[^1].Sequence is long nextFromExclusive)
+        {
+            QueueReplayRequest(
+                replayReason,
+                cancellationToken,
+                fromSequenceInclusive: nextFromExclusive + 1,
+                toSequenceInclusive: payload.AvailableToSequence,
+                publishReplayStatus: !payload.GapDetected);
+            return true;
         }
 
         if (!payload.GapDetected && !IsGapDetected())
@@ -692,6 +723,20 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         _replayRequestPending = false;
     }
 
+    private void RestoreBrokerOrderingStateLocked(MessageConnectionResumeState resumeState)
+    {
+        ArgumentNullException.ThrowIfNull(resumeState);
+
+        _currentGeneration = Math.Max(SessionEnvelopeContract.InitialGeneration, resumeState.Generation);
+        _acknowledgedSequence = resumeState.AcknowledgedSequence is > 0 ? resumeState.AcknowledgedSequence : null;
+        _highestObservedBrokerSequence = _acknowledgedSequence;
+        _observedBrokerSequences.Clear();
+        _appliedBrokerSequences.Clear();
+        _appliedReplayResponseMessageIds.Clear();
+        _gapDetected = false;
+        _replayRequestPending = false;
+    }
+
     private readonly record struct BrokerEnvelopeTrackingResult(
         bool ShouldProcess,
         bool ShouldAppend,
@@ -708,7 +753,10 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
     private async Task RequestReplayAsync(
         ReplayRequestReason reason,
         bool operationGateHeld,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long? fromSequenceInclusive = null,
+        long? toSequenceInclusive = null,
+        bool publishReplayStatus = true)
     {
         if (!operationGateHeld)
         {
@@ -717,10 +765,15 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
 
         try
         {
-            var replayRequest = CreateReplayRequestEnvelope(reason);
+            var replayRequest = CreateReplayRequestEnvelope(reason, fromSequenceInclusive, toSequenceInclusive);
             if (replayRequest is null)
             {
                 return;
+            }
+
+            if (publishReplayStatus)
+            {
+                PublishStatus(CreateReplayPendingStatus(reason, replayRequest.Payload.FromSequenceInclusive));
             }
 
             await SendEnvelopeCoreAsync(replayRequest, requireConnectedStatus: true, cancellationToken).ConfigureAwait(false);
@@ -743,16 +796,38 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         }
     }
 
-    private void QueueReplayRequest(ReplayRequestReason reason, CancellationToken cancellationToken)
+    private void QueueReplayRequest(
+        ReplayRequestReason reason,
+        CancellationToken cancellationToken,
+        long? fromSequenceInclusive = null,
+        long? toSequenceInclusive = null,
+        bool publishReplayStatus = true)
     {
-        _ = RunReplayRequestAsync(reason, cancellationToken);
+        _ = RunReplayRequestAsync(
+            reason,
+            cancellationToken,
+            fromSequenceInclusive,
+            toSequenceInclusive,
+            publishReplayStatus);
     }
 
-    private async Task RunReplayRequestAsync(ReplayRequestReason reason, CancellationToken cancellationToken)
+    private async Task RunReplayRequestAsync(
+        ReplayRequestReason reason,
+        CancellationToken cancellationToken,
+        long? fromSequenceInclusive = null,
+        long? toSequenceInclusive = null,
+        bool publishReplayStatus = true)
     {
         try
         {
-            await RequestReplayAsync(reason, operationGateHeld: false, cancellationToken).ConfigureAwait(false);
+            await RequestReplayAsync(
+                    reason,
+                    operationGateHeld: false,
+                    cancellationToken,
+                    fromSequenceInclusive,
+                    toSequenceInclusive,
+                    publishReplayStatus)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -763,7 +838,10 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         }
     }
 
-    private MessageEnvelope<ReplayRequestPayload>? CreateReplayRequestEnvelope(ReplayRequestReason reason)
+    private MessageEnvelope<ReplayRequestPayload>? CreateReplayRequestEnvelope(
+        ReplayRequestReason reason,
+        long? fromSequenceInclusive = null,
+        long? toSequenceInclusive = null)
     {
         lock (_stateSync)
         {
@@ -791,7 +869,8 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 CorrelationId = $"mobile-session:{_activeSession.SessionId}",
                 Payload = new ReplayRequestPayload
                 {
-                    FromSequenceInclusive = (_acknowledgedSequence ?? 0) + 1,
+                    FromSequenceInclusive = fromSequenceInclusive ?? (_acknowledgedSequence ?? 0) + 1,
+                    ToSequenceInclusive = toSequenceInclusive,
                     Reason = reason
                 }
             };
@@ -1198,7 +1277,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
     }
 
     private MessageConnectionStatus CreateReadyStatus(SessionDescriptor session) =>
-        new()
+        CreateStatusWithOrderingState(new MessageConnectionStatus
         {
             State = MessageConnectionState.Ready,
             Summary = $"Live messaging is staged for session '{session.SessionId}'. Use Retry live transport to connect when needed.",
@@ -1206,22 +1285,22 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             SupportsLiveSessionStream = true,
             ProjectId = session.ProjectId,
             SessionId = session.SessionId
-        };
+        });
 
     private MessageConnectionStatus CreateDisconnectedStatus(string? summary = null) =>
-        new()
+        CreateStatusWithOrderingState(new MessageConnectionStatus
         {
             State = MessageConnectionState.Disconnected,
             Summary = summary ?? $"Live messaging is disconnected from hub '{_messagingOptions.Hub}'.",
             Hub = _messagingOptions.Hub,
             SupportsLiveSessionStream = true
-        };
+        });
 
     private MessageConnectionStatus CreateFaultedStatus(
         SessionDescriptor session,
         int reconnectAttempt,
         string failureReason) =>
-        new()
+        CreateStatusWithOrderingState(new MessageConnectionStatus
         {
             State = MessageConnectionState.Faulted,
             Summary = $"Live messaging is unavailable for session '{session.SessionId}'. {failureReason}",
@@ -1233,7 +1312,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             RefreshAtUtc = _negotiation?.RefreshAtUtc,
             ReconnectAttempt = reconnectAttempt,
             FailureReason = failureReason
-        };
+        });
 
     private MessageConnectionStatus? TryCreateConnectedStatus()
     {
@@ -1258,9 +1337,42 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 ConnectionId = _connectionId,
                 ConnectedAtUtc = _currentStatus.ConnectedAtUtc,
                 RefreshAtUtc = _negotiation.RefreshAtUtc,
-                ReconnectAttempt = _currentStatus.ReconnectAttempt
+                ReconnectAttempt = _currentStatus.ReconnectAttempt,
+                Generation = _currentGeneration,
+                AcknowledgedSequence = _acknowledgedSequence
             };
         }
+    }
+
+    private MessageConnectionStatus CreateReplayPendingStatus(ReplayRequestReason reason, long fromSequenceInclusive)
+    {
+        var connectedStatus = TryCreateConnectedStatus();
+        var session = GetActiveSession();
+        var sessionId = session?.SessionId ?? CurrentStatus.SessionId ?? "the active session";
+        var summary = reason switch
+        {
+            ReplayRequestReason.ClientRecovery =>
+                $"Resuming session '{sessionId}' from this device. Recovering transcript continuity from sequence {fromSequenceInclusive}.",
+            ReplayRequestReason.ReconnectResume =>
+                $"Live messaging reconnected for session '{sessionId}'. Recovering transcript continuity from sequence {fromSequenceInclusive}.",
+            _ =>
+                $"A broker sequence gap was detected for session '{sessionId}'. Recovering messages from sequence {fromSequenceInclusive}."
+        };
+
+        if (connectedStatus is null && session is not null)
+        {
+            connectedStatus = CreateFaultedStatus(session, CurrentStatus.ReconnectAttempt, summary);
+        }
+
+        return (connectedStatus ?? CurrentStatus) with
+        {
+            Summary = summary,
+            IsReplayPending = true,
+            ReplayReason = reason,
+            ReplayFromSequenceInclusive = fromSequenceInclusive,
+            ReplayAvailableFromSequence = null,
+            ReplayAvailableToSequence = null
+        };
     }
 
     private MessageConnectionStatus CreateReplayGapWarningStatus(string sessionId, ReplayResponsePayload payload)
@@ -1283,7 +1395,9 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         {
             State = MessageConnectionState.Faulted,
             Summary = $"Live messaging replay warning for session '{sessionId}'. {failureReason}",
-            FailureReason = failureReason
+            FailureReason = failureReason,
+            ReplayAvailableFromSequence = payload.AvailableFromSequence,
+            ReplayAvailableToSequence = payload.AvailableToSequence
         };
     }
 
@@ -1334,8 +1448,22 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         {
             State = MessageConnectionState.Faulted,
             Summary = summary,
-            FailureReason = failureReason
+            FailureReason = failureReason,
+            ReplayAvailableFromSequence = null,
+            ReplayAvailableToSequence = null
         };
+    }
+
+    private MessageConnectionStatus CreateStatusWithOrderingState(MessageConnectionStatus status)
+    {
+        lock (_stateSync)
+        {
+            return status with
+            {
+                Generation = _currentGeneration,
+                AcknowledgedSequence = _acknowledgedSequence
+            };
+        }
     }
 
     private static string ResolveUpstreamEventName(SessionMessageType messageType) =>

@@ -1,5 +1,7 @@
+using System.Text.Json;
 using SquadScout.App.Services;
 using SquadScout.App.ViewModels;
+using SquadScout.Contracts.Messages;
 using SquadScout.Contracts.Projects;
 using SquadScout.Contracts.Sessions;
 
@@ -152,6 +154,48 @@ public sealed class SessionTranscriptControllerTests
         Assert.Contains(result.ViewState.Banners, banner => banner.Title == "Live transport unavailable");
     }
 
+    [Fact]
+    public void ObserveTraffic_ReplayRecoveryAppendsSystemMessagesAndBrokerOutput()
+    {
+        var controller = new SessionTranscriptController();
+        var snapshot = CreateSnapshot(SessionState.Running, SessionActivationSource.Broker);
+        var connectionStatus = new MessageConnectionStatus
+        {
+            State = MessageConnectionState.Connected,
+            Summary = "Connected.",
+            Hub = "squadscout",
+            SupportsLiveSessionStream = true
+        };
+
+        controller.Sync(snapshot, connectionStatus);
+        controller.ObserveTraffic(snapshot, connectionStatus, CreateTraffic(CreateReplayRequest(ReplayRequestReason.ClientRecovery, 4)));
+        var state = controller.ObserveTraffic(snapshot, connectionStatus, CreateTraffic(CreateOutputEnvelope(sequence: 4, content: "Recovered output")));
+
+        Assert.Contains(state.Messages, message => message.IsSystem && message.Text.Contains("Recovering transcript messages from sequence 4", StringComparison.Ordinal));
+        Assert.Contains(state.Messages, message => !message.IsSystem && message.Text == "Recovered output");
+    }
+
+    [Fact]
+    public void RestoreFromTraffic_DeduplicatesPreviouslyPersistedReplayableMessages()
+    {
+        var controller = new SessionTranscriptController();
+        var snapshot = CreateSnapshot(SessionState.Running, SessionActivationSource.Broker);
+        var connectionStatus = new MessageConnectionStatus
+        {
+            State = MessageConnectionState.Connected,
+            Summary = "Connected.",
+            Hub = "squadscout",
+            SupportsLiveSessionStream = true
+        };
+
+        var traffic = CreateTraffic(CreateOutputEnvelope(sequence: 8, content: "Only once"));
+        controller.RestoreFromTraffic(snapshot, connectionStatus, [traffic]);
+        var state = controller.ObserveTraffic(snapshot, connectionStatus, traffic);
+
+        Assert.Single(state.Messages);
+        Assert.Equal("Only once", state.Messages[0].Text);
+    }
+
     private static ActiveSessionSnapshot CreateSnapshot(SessionState state, SessionActivationSource source)
     {
         return new ActiveSessionSnapshot(
@@ -171,4 +215,69 @@ public sealed class SessionTranscriptControllerTests
             source,
             "Active session");
     }
+
+    private static MessageEnvelopeTraffic CreateTraffic<TPayload>(MessageEnvelope<TPayload> envelope) =>
+        new()
+        {
+            Direction = envelope.Direction == MessageDirection.BrokerToClient
+                ? MessageTrafficDirection.Incoming
+                : MessageTrafficDirection.Outgoing,
+            Envelope = ToJsonEnvelope(envelope),
+            Summary = envelope.MessageType.ToString()
+        };
+
+    private static MessageEnvelope<ReplayRequestPayload> CreateReplayRequest(ReplayRequestReason reason, long fromSequenceInclusive) =>
+        new()
+        {
+            ProjectId = "squadscout",
+            SessionId = "session-10",
+            Generation = SessionEnvelopeContract.InitialGeneration,
+            MessageType = SessionMessageType.ReplayRequest,
+            Direction = MessageDirection.ClientToBroker,
+            TimestampUtc = DateTimeOffset.UtcNow,
+            MessageId = $"replay-{fromSequenceInclusive}",
+            CorrelationId = "corr",
+            Payload = new ReplayRequestPayload
+            {
+                FromSequenceInclusive = fromSequenceInclusive,
+                Reason = reason
+            }
+        };
+
+    private static MessageEnvelope<OutputChunkPayload> CreateOutputEnvelope(long sequence, string content) =>
+        new()
+        {
+            ProjectId = "squadscout",
+            SessionId = "session-10",
+            Generation = SessionEnvelopeContract.InitialGeneration,
+            MessageType = SessionMessageType.Output,
+            Direction = MessageDirection.BrokerToClient,
+            Sequence = sequence,
+            TimestampUtc = DateTimeOffset.UtcNow,
+            MessageId = $"broker-{sequence}",
+            CorrelationId = "corr",
+            Payload = new OutputChunkPayload
+            {
+                Content = content
+            }
+        };
+
+    private static MessageEnvelope<JsonElement> ToJsonEnvelope<TPayload>(MessageEnvelope<TPayload> envelope) =>
+        new()
+        {
+            ContractVersion = envelope.ContractVersion,
+            ProjectId = envelope.ProjectId,
+            SessionId = envelope.SessionId,
+            Generation = envelope.Generation,
+            MessageType = envelope.MessageType,
+            Direction = envelope.Direction,
+            Sequence = envelope.Sequence,
+            ClientSequence = envelope.ClientSequence,
+            AcknowledgedSequence = envelope.AcknowledgedSequence,
+            TimestampUtc = envelope.TimestampUtc,
+            MessageId = envelope.MessageId,
+            CorrelationId = envelope.CorrelationId,
+            CausationId = envelope.CausationId,
+            Payload = JsonSerializer.SerializeToElement(envelope.Payload, SessionMessageSerializer.DefaultOptions)
+        };
 }

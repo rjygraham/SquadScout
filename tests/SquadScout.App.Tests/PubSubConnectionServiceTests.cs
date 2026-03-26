@@ -273,6 +273,47 @@ public sealed class PubSubConnectionServiceTests
     }
 
     [Fact]
+    public async Task PrepareForSessionAsync_WithResumeStateRequestsClientRecoveryReplay()
+    {
+        var session = CreateSession();
+        var socket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-restore")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        await using var service = CreateService(new RecordingNegotiationClient(CreateNegotiationResponse(session)), socket);
+        var status = await service.PrepareForSessionAsync(session, new MessageConnectionResumeState
+        {
+            Generation = 2,
+            AcknowledgedSequence = 5
+        });
+        await WaitForAsync(() => socket.SentTexts.Count >= 2);
+
+        using var replayCommand = JsonDocument.Parse(socket.SentTexts[1]);
+        var replayRequest = replayCommand.RootElement.GetProperty("data")
+            .Deserialize<MessageEnvelope<ReplayRequestPayload>>(SessionMessageSerializer.DefaultOptions);
+
+        Assert.NotNull(replayRequest);
+        Assert.Equal(MessageConnectionState.Connected, status.State);
+        Assert.True(service.CurrentStatus.IsReplayPending);
+        Assert.Equal(ReplayRequestReason.ClientRecovery, service.CurrentStatus.ReplayReason);
+        Assert.Equal(6, service.CurrentStatus.ReplayFromSequenceInclusive);
+        Assert.Equal(ReplayRequestReason.ClientRecovery, replayRequest!.Payload.Reason);
+        Assert.Equal(2, replayRequest.Generation);
+        Assert.Equal(5, replayRequest.AcknowledgedSequence);
+        Assert.Equal(6, replayRequest.Payload.FromSequenceInclusive);
+    }
+
+    [Fact]
     public async Task DuplicateReplayResponseEnvelopeIsIgnoredOnTheReplayPath()
     {
         var session = CreateSession();
@@ -339,6 +380,69 @@ public sealed class PubSubConnectionServiceTests
             traffic.Direction == MessageTrafficDirection.Incoming &&
             traffic.Envelope.MessageType == SessionMessageType.ReplayResponse &&
             traffic.Envelope.MessageId == "replay-fixed"));
+    }
+
+    [Fact]
+    public async Task ReplayResponseWithHasMoreRequestsAnotherPageBeforeRestoringConnectedStatus()
+    {
+        var session = CreateSession();
+        var socket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-paged-replay")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        await using var service = CreateService(new RecordingNegotiationClient(CreateNegotiationResponse(session)), socket);
+        await service.PrepareForSessionAsync(session, new MessageConnectionResumeState
+        {
+            Generation = SessionEnvelopeContract.InitialGeneration
+        });
+        await WaitForAsync(() => socket.SentTexts.Count >= 2);
+
+        socket.EnqueueIncoming(GroupMessage(CreateReplayResponseEnvelope(
+            session,
+            hasMore: true,
+            availableFromSequence: 1,
+            availableToSequence: 4,
+            messages:
+            [
+                ToJsonEnvelope(CreateBrokerEnvelope(session, sequence: 1)),
+                ToJsonEnvelope(CreateBrokerEnvelope(session, sequence: 2))
+            ])));
+        await WaitForAsync(() => socket.SentTexts.Count >= 3);
+
+        using (var secondReplayCommand = JsonDocument.Parse(socket.SentTexts[2]))
+        {
+            var secondReplayRequest = secondReplayCommand.RootElement.GetProperty("data")
+                .Deserialize<MessageEnvelope<ReplayRequestPayload>>(SessionMessageSerializer.DefaultOptions);
+
+            Assert.NotNull(secondReplayRequest);
+            Assert.Equal(ReplayRequestReason.ClientRecovery, secondReplayRequest!.Payload.Reason);
+            Assert.Equal(3, secondReplayRequest.Payload.FromSequenceInclusive);
+            Assert.Equal(4, secondReplayRequest.Payload.ToSequenceInclusive);
+        }
+
+        socket.EnqueueIncoming(GroupMessage(CreateReplayResponseEnvelope(
+            session,
+            availableFromSequence: 1,
+            availableToSequence: 4,
+            messages:
+            [
+                ToJsonEnvelope(CreateBrokerEnvelope(session, sequence: 3)),
+                ToJsonEnvelope(CreateBrokerEnvelope(session, sequence: 4))
+            ])));
+        await WaitForAsync(() => service.CurrentStatus.State == MessageConnectionState.Connected && !service.CurrentStatus.IsReplayPending);
+
+        Assert.Equal(4, service.CurrentStatus.AcknowledgedSequence);
+        Assert.Contains(service.RecentTraffic, traffic => traffic.Direction == MessageTrafficDirection.Incoming && traffic.Envelope.Sequence == 4);
     }
 
     [Fact]
@@ -1002,6 +1106,7 @@ public sealed class PubSubConnectionServiceTests
         SessionDescriptor session,
         long generation = SessionEnvelopeContract.InitialGeneration,
         bool gapDetected = false,
+        bool hasMore = false,
         long? availableFromSequence = null,
         long? availableToSequence = null,
         IReadOnlyList<MessageEnvelope<JsonElement>>? messages = null,
@@ -1025,7 +1130,8 @@ public sealed class PubSubConnectionServiceTests
                 AvailableFromSequence = availableFromSequence,
                 AvailableToSequence = availableToSequence,
                 GapDetected = gapDetected,
-                IsComplete = true,
+                HasMore = hasMore,
+                IsComplete = !hasMore,
                 Messages = messages ?? Array.Empty<MessageEnvelope<JsonElement>>()
             }
         };

@@ -63,6 +63,20 @@ public sealed record MessageConnectionStatus
     public int ReconnectAttempt { get; init; }
 
     public string? FailureReason { get; init; }
+
+    public long Generation { get; init; } = SessionEnvelopeContract.InitialGeneration;
+
+    public long? AcknowledgedSequence { get; init; }
+
+    public bool IsReplayPending { get; init; }
+
+    public ReplayRequestReason? ReplayReason { get; init; }
+
+    public long? ReplayFromSequenceInclusive { get; init; }
+
+    public long? ReplayAvailableFromSequence { get; init; }
+
+    public long? ReplayAvailableToSequence { get; init; }
 }
 
 public enum MessageTrafficDirection
@@ -99,6 +113,24 @@ public sealed record ActiveSessionSnapshot(
     public bool HasActiveSession => Project is not null && Session is not null;
 }
 
+public sealed record MessageConnectionResumeState
+{
+    public long Generation { get; init; } = SessionEnvelopeContract.InitialGeneration;
+
+    public long? AcknowledgedSequence { get; init; }
+}
+
+public sealed record ActiveSessionResumeState
+{
+    public ActiveSessionSnapshot Snapshot { get; init; } = ActiveSessionSnapshot.Empty;
+
+    public MessageConnectionResumeState Connection { get; init; } = new();
+
+    public IReadOnlyList<MessageEnvelopeTraffic> RecentTraffic { get; init; } = Array.Empty<MessageEnvelopeTraffic>();
+
+    public DateTimeOffset SavedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+}
+
 public interface IAuthenticationService
 {
     Task<ClientIdentity> GetCurrentIdentityAsync(CancellationToken cancellationToken = default);
@@ -114,7 +146,10 @@ public interface IMessageConnectionService
 
     IReadOnlyList<MessageEnvelopeTraffic> RecentTraffic { get; }
 
-    Task<MessageConnectionStatus> PrepareForSessionAsync(SessionDescriptor session, CancellationToken cancellationToken = default);
+    Task<MessageConnectionStatus> PrepareForSessionAsync(
+        SessionDescriptor session,
+        MessageConnectionResumeState? resumeState = null,
+        CancellationToken cancellationToken = default);
 
     Task<MessageConnectionStatus> ReconnectAsync(CancellationToken cancellationToken = default);
 
@@ -123,6 +158,17 @@ public interface IMessageConnectionService
     Task SendEnvelopeAsync<TPayload>(MessageEnvelope<TPayload> envelope, CancellationToken cancellationToken = default);
 
     Task<MessageConnectionStatus> ResetAsync(CancellationToken cancellationToken = default);
+}
+
+public interface ISessionResumeService
+{
+    ActiveSessionResumeState? CurrentState { get; }
+
+    Task RestoreAsync(CancellationToken cancellationToken = default);
+
+    Task SaveAsync(ActiveSessionResumeState state, CancellationToken cancellationToken = default);
+
+    Task ClearAsync(CancellationToken cancellationToken = default);
 }
 
 public interface IProjectCatalogService

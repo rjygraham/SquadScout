@@ -15,6 +15,7 @@ public sealed class ProjectSelectionViewModel : ViewModelBase
     private readonly IMessageConnectionService _messageConnectionService;
     private readonly IAppNavigator _navigator;
     private readonly IProjectCatalogService _projectCatalogService;
+    private readonly ISessionResumeService _sessionResumeService;
     private readonly ISessionLifecycleService _sessionLifecycleService;
 
     private ActiveSessionSnapshot _activeSessionSnapshot = ActiveSessionSnapshot.Empty;
@@ -35,6 +36,7 @@ public sealed class ProjectSelectionViewModel : ViewModelBase
         ISessionLifecycleService sessionLifecycleService,
         IAuthenticationService authenticationService,
         IMessageConnectionService messageConnectionService,
+        ISessionResumeService sessionResumeService,
         IActiveSessionState activeSessionState,
         IAppNavigator navigator)
     {
@@ -45,6 +47,7 @@ public sealed class ProjectSelectionViewModel : ViewModelBase
         _sessionLifecycleService = sessionLifecycleService;
         _authenticationService = authenticationService;
         _messageConnectionService = messageConnectionService;
+        _sessionResumeService = sessionResumeService;
         _activeSessionState = activeSessionState;
         _navigator = navigator;
 
@@ -235,6 +238,8 @@ public sealed class ProjectSelectionViewModel : ViewModelBase
 
     public async Task InitializeAsync()
     {
+        await _sessionResumeService.RestoreAsync();
+
         if (_initialized)
         {
             ApplyActiveSession(_activeSessionState.GetSnapshot());
@@ -408,6 +413,16 @@ public sealed class ProjectSelectionViewModel : ViewModelBase
             _activeSessionState.SetActiveSession(SelectedProject, launchResult.Session, launchResult.Source, launchResult.Summary);
 
             var connectionStatus = await _messageConnectionService.PrepareForSessionAsync(launchResult.Session);
+            await _sessionResumeService.SaveAsync(new ActiveSessionResumeState
+            {
+                Snapshot = _activeSessionState.GetSnapshot(),
+                Connection = new MessageConnectionResumeState
+                {
+                    Generation = connectionStatus.Generation,
+                    AcknowledgedSequence = connectionStatus.AcknowledgedSequence
+                },
+                RecentTraffic = _messageConnectionService.RecentTraffic.ToArray()
+            });
             StatusMessage = $"{launchResult.Summary} {connectionStatus.Summary}";
             NotifyProjectPresentationChanged();
 

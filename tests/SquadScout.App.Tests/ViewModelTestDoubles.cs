@@ -158,7 +158,7 @@ namespace SquadScout.App.Tests
 
         public Func<Task<MessageConnectionStatus>>? OnResetAsync { get; set; }
 
-        public Func<SessionDescriptor, Task<MessageConnectionStatus>>? OnPrepareForSessionAsync { get; set; }
+        public Func<SessionDescriptor, MessageConnectionResumeState?, Task<MessageConnectionStatus>>? OnPrepareForSessionAsync { get; set; }
 
         public int PrepareForSessionCallCount { get; private set; }
 
@@ -178,13 +178,16 @@ namespace SquadScout.App.Tests
             return Task.CompletedTask;
         }
 
-        public async Task<MessageConnectionStatus> PrepareForSessionAsync(SessionDescriptor session, CancellationToken cancellationToken = default)
+        public async Task<MessageConnectionStatus> PrepareForSessionAsync(
+            SessionDescriptor session,
+            MessageConnectionResumeState? resumeState = null,
+            CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             PrepareForSessionCallCount++;
             var status = OnPrepareForSessionAsync is null
                 ? _currentStatus
-                : await OnPrepareForSessionAsync(session);
+                : await OnPrepareForSessionAsync(session, resumeState);
 
             SetCurrentStatus(status);
             return status;
@@ -233,6 +236,47 @@ namespace SquadScout.App.Tests
         {
             _currentStatus = status;
             StatusChanged?.Invoke(this, status);
+        }
+    }
+
+    internal sealed class RecordingSessionResumeService : ISessionResumeService
+    {
+        public Func<Task>? OnRestoreAsync { get; set; }
+
+        public ActiveSessionResumeState? CurrentState { get; private set; }
+
+        public int ClearCallCount { get; private set; }
+
+        public int RestoreCallCount { get; private set; }
+
+        public int SaveCallCount { get; private set; }
+
+        public Task RestoreAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            RestoreCallCount++;
+            return OnRestoreAsync?.Invoke() ?? Task.CompletedTask;
+        }
+
+        public Task SaveAsync(ActiveSessionResumeState state, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SaveCallCount++;
+            CurrentState = state;
+            return Task.CompletedTask;
+        }
+
+        public Task ClearAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ClearCallCount++;
+            CurrentState = null;
+            return Task.CompletedTask;
+        }
+
+        public void SetCurrentState(ActiveSessionResumeState? state)
+        {
+            CurrentState = state;
         }
     }
 

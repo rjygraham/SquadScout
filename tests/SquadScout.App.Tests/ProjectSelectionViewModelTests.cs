@@ -116,6 +116,41 @@ public sealed class ProjectSelectionViewModelTests
     }
 
     [Fact]
+    public async Task InitializeAsync_RestoresSavedSessionBeforeShowingResumeCard()
+    {
+        var project = CreateProject("squadscout", "SquadScout");
+        var activeState = new ActiveSessionState();
+        var resumeService = new RecordingSessionResumeService
+        {
+            OnRestoreAsync = () =>
+            {
+                activeState.SetActiveSession(
+                    project,
+                    CreateSession(project.ProjectId, "session-restored", SessionState.Running),
+                    SessionActivationSource.Broker,
+                    "Recovered from this device.");
+                return Task.CompletedTask;
+            }
+        };
+
+        var projectCatalog = new ScriptedProjectCatalogService();
+        projectCatalog.EnqueueResult(CreateCatalogSnapshot(project));
+
+        var viewModel = CreateViewModel(
+            activeSessionState: activeState,
+            sessionResumeService: resumeService,
+            projectCatalog: projectCatalog);
+
+        await viewModel.InitializeAsync();
+
+        Assert.Equal(1, resumeService.RestoreCallCount);
+        Assert.True(viewModel.HasActiveSession);
+        Assert.Equal("Recovered from this device.", viewModel.SessionSummary);
+        Assert.True(viewModel.ResumeActiveSessionCommand.CanExecute(null));
+        Assert.False(viewModel.StartSessionCommand.CanExecute(null));
+    }
+
+    [Fact]
     public async Task StartSessionAsync_NormalizesRequestAndNavigatesToTranscript()
     {
         var project = CreateProject("squadscout", "SquadScout");
@@ -131,7 +166,7 @@ public sealed class ProjectSelectionViewModelTests
         };
 
         var messageConnection = new RecordingMessageConnectionService();
-        messageConnection.OnPrepareForSessionAsync = session => Task.FromResult(new MessageConnectionStatus
+        messageConnection.OnPrepareForSessionAsync = (session, _) => Task.FromResult(new MessageConnectionStatus
         {
             State = MessageConnectionState.Ready,
             Summary = "Messaging composition is ready for the session.",
@@ -140,13 +175,15 @@ public sealed class ProjectSelectionViewModelTests
         });
 
         var activeState = new ActiveSessionState();
+        var resumeService = new RecordingSessionResumeService();
         var navigator = new RecordingNavigator();
         var viewModel = CreateViewModel(
             activeSessionState: activeState,
             navigator: navigator,
             projectCatalog: projectCatalog,
             sessionLifecycle: lifecycle,
-            connectionService: messageConnection);
+            connectionService: messageConnection,
+            sessionResumeService: resumeService);
 
         await viewModel.InitializeAsync();
         viewModel.RequestedBy = "   ";
@@ -166,12 +203,14 @@ public sealed class ProjectSelectionViewModelTests
         Assert.Equal("session-15", snapshot.Session?.SessionId);
         Assert.Contains("Started a broker-backed pending session.", viewModel.StatusMessage, StringComparison.Ordinal);
         Assert.Contains("Messaging composition is ready for the session.", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.Equal(1, resumeService.SaveCallCount);
     }
 
     private static ProjectSelectionViewModel CreateViewModel(
         ActiveSessionState? activeSessionState = null,
         StubAuthenticationService? authenticationService = null,
         RecordingMessageConnectionService? connectionService = null,
+        RecordingSessionResumeService? sessionResumeService = null,
         RecordingNavigator? navigator = null,
         ScriptedProjectCatalogService? projectCatalog = null,
         RecordingSessionLifecycleService? sessionLifecycle = null)
@@ -183,6 +222,7 @@ public sealed class ProjectSelectionViewModelTests
             sessionLifecycle ?? new RecordingSessionLifecycleService(),
             authenticationService ?? new StubAuthenticationService(new ClientIdentity("ryan", "Ryan Graham", "BrokerNegotiated")),
             connectionService ?? new RecordingMessageConnectionService(),
+            sessionResumeService ?? new RecordingSessionResumeService(),
             activeSessionState ?? new ActiveSessionState(),
             navigator ?? new RecordingNavigator());
     }
