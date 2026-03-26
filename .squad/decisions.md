@@ -1186,3 +1186,33 @@ Three safe levers (ranked by ROI):
 3. Document findings honestly to set correct expectations
 
 **Decision:** Phase 1 backlog additions documented and tracked. No cross-cutting dependencies identified.
+
+## Link — Issue #18 Orleans Silo Host & SQLite Bootstrap (2026-03-26)
+
+### Decision
+
+Issue #18 lands as a **bootstrap-only Orleans host slice**:
+- start a local silo with `UseLocalhostClustering()`
+- configure SQLite-backed Orleans ADO.NET grain storage
+- auto-bootstrap the required SQLite schema from embedded SQL scripts
+- keep broker session/project ownership on the existing Phase 1 in-memory services until issues #19 and #20 migrate those seams
+
+### Rationale
+
+- This matches the Phase 2 sequencing already accepted in the backlog: issue #18 is infrastructure, while durable grain ownership belongs to the follow-on migration issues.
+- Local validation showed the tested Orleans ADO.NET package line still does not recognize SQLite invariants cleanly out of the box, so a local runtime compatibility shim is required to make `Microsoft.Data.Sqlite` storage initialize for the broker's single-silo scenario.
+- Keeping the runtime path in-memory preserves a safe feature toggle: operators can validate silo startup and SQLite bootstrap without changing broker behavior for sessions or projects.
+
+### Implementation Notes
+
+- `src\SquadScout.Broker\Orleans\OrleansSqliteSchemaBootstrapper.cs` resolves the configured database path, creates the directory, runs embedded `Sqlite-Main.sql` and `Sqlite-Persistence.sql`, and verifies `OrleansQuery`, `OrleansStorage`, plus the required storage query keys.
+- `src\SquadScout.Broker\Orleans\OrleansSqliteCompatibilityShim.cs` patches Orleans.Persistence.AdoNet internal invariant/constants/provider-factory maps at runtime for `Microsoft.Data.Sqlite` / `System.Data.SQLite`.
+- `src\SquadScout.Broker\Program.cs` exposes `/api/orleans/status` so the broker can report whether Orleans is disabled or running in bootstrap-only mode, including schema readiness and shim state.
+- `src\SquadScout.Broker\appsettings.json` now allows both `localhost` and `127.0.0.1`, which keeps host filtering aligned with the broker's default loopback listen URL during smoke validation.
+
+### Validation
+
+- `dotnet build .\SquadScout.slnx -nologo` ✅
+- `dotnet test .\SquadScout.slnx -nologo --no-build` ✅
+- `dotnet run --project .\src\SquadScout.Broker\SquadScout.Broker.csproj --no-launch-profile` with Orleans enabled + SQLite smoke configuration ✅
+- `GET http://127.0.0.1:5073/api/orleans/status` returned bootstrap-only + schema-ready + compatibility-shim-applied ✅

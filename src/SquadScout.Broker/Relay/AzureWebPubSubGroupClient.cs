@@ -20,7 +20,7 @@ public sealed class AzureWebPubSubGroupClient : IWebPubSubGroupClient
             RequestContent.Create(jsonPayload),
             JsonContentType,
             [],
-            new RequestContext
+            new Azure.RequestContext
             {
                 CancellationToken = cancellationToken
             });

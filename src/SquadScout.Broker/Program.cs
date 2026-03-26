@@ -1,4 +1,5 @@
 using SquadScout.Broker.Configuration;
+using SquadScout.Broker.Orleans;
 using SquadScout.Broker.Pty;
 using SquadScout.Broker.Projects;
 using SquadScout.Broker.Realtime;
@@ -13,6 +14,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
+using Orleans.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
@@ -36,6 +38,7 @@ builder.Services.ConfigureHttpJsonOptions(static options =>
 });
 
 var brokerOptions = builder.Configuration.GetSection(BrokerHostOptions.SectionName).Get<BrokerHostOptions>() ?? new BrokerHostOptions();
+var orleansOptions = builder.Configuration.GetSection(OrleansHostOptions.SectionName).Get<OrleansHostOptions>() ?? new OrleansHostOptions();
 var effectiveListenUrl = builder.Configuration[WebHostDefaults.ServerUrlsKey] ?? brokerOptions.ListenUrl;
 if (string.IsNullOrWhiteSpace(builder.Configuration[WebHostDefaults.ServerUrlsKey]))
 {
@@ -45,6 +48,35 @@ if (string.IsNullOrWhiteSpace(builder.Configuration[WebHostDefaults.ServerUrlsKe
 builder.Services.Configure<BrokerHostOptions>(builder.Configuration.GetSection(BrokerHostOptions.SectionName));
 builder.Services.Configure<CopilotPtyHostOptions>(builder.Configuration.GetSection(CopilotPtyHostOptions.SectionName));
 builder.Services.Configure<AzureWebPubSubOptions>(builder.Configuration.GetSection(AzureWebPubSubOptions.SectionName));
+builder.Services.Configure<OrleansHostOptions>(builder.Configuration.GetSection(OrleansHostOptions.SectionName));
+
+OrleansHostStatusSnapshot orleansStatus;
+if (orleansOptions.Enabled)
+{
+    var bootstrapResult = await OrleansSqliteSchemaBootstrapper.InitializeAsync(orleansOptions);
+    var compatibilityResult = OrleansSqliteCompatibilityShim.EnsureConfigured(orleansOptions.AdoNetInvariant);
+    builder.Host.UseOrleans(siloBuilder =>
+    {
+        siloBuilder.UseLocalhostClustering(
+            siloPort: orleansOptions.SiloPort,
+            gatewayPort: orleansOptions.GatewayPort,
+            primarySiloEndpoint: null,
+            serviceId: orleansOptions.ServiceId,
+            clusterId: orleansOptions.ClusterId);
+        siloBuilder.AddAdoNetGrainStorage(orleansOptions.StorageProvider, options =>
+        {
+            options.Invariant = bootstrapResult.Invariant;
+            options.ConnectionString = bootstrapResult.ConnectionString;
+        });
+    });
+    orleansStatus = OrleansHostStatusSnapshot.BootstrapOnly(orleansOptions, bootstrapResult, compatibilityResult);
+}
+else
+{
+    orleansStatus = OrleansHostStatusSnapshot.InMemory(orleansOptions);
+}
+
+builder.Services.AddSingleton(orleansStatus);
 builder.Services.AddSingleton<IProjectCatalog, InMemoryProjectCatalog>();
 builder.Services.AddSingleton<IPtyHost, CopilotPtyHost>();
 builder.Services.AddSingleton<PtySessionEnvelopePump>();
@@ -80,16 +112,22 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-app.MapGet("/", () => Results.Ok(new
+app.MapGet("/", (OrleansHostStatusSnapshot status) => Results.Ok(new
 {
     service = "SquadScout Broker",
     listenUrl = effectiveListenUrl,
     localUi = "reserved for the co-hosted Blazor Server admin shell",
     relay = "reserved for Azure Web PubSub integration",
-    state = "reserved for Orleans-backed session ownership"
+    state = new
+    {
+        hostMode = status.HostMode,
+        sessionStateMode = status.SessionStateMode,
+        summary = status.Summary
+    }
 }));
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/api/orleans/status", (OrleansHostStatusSnapshot status) => Results.Ok(status));
 
 app.MapMethods("/api/upstream", ["POST", "OPTIONS"], async (
     HttpContext context,
