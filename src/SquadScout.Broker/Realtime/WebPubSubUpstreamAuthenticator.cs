@@ -2,12 +2,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using SquadScout.Functions.Configuration;
+using SquadScout.Broker.Configuration;
 
-namespace SquadScout.Functions.Upstream;
+namespace SquadScout.Broker.Realtime;
 
 public sealed class WebPubSubUpstreamAuthenticator
 {
@@ -25,19 +25,15 @@ public sealed class WebPubSubUpstreamAuthenticator
     private readonly ILogger<WebPubSubUpstreamAuthenticator> _logger;
 
     public WebPubSubUpstreamAuthenticator(
-        IOptions<FunctionsHostOptions> options,
+        IOptions<AzureWebPubSubOptions> options,
         ILogger<WebPubSubUpstreamAuthenticator> logger)
     {
         ArgumentNullException.ThrowIfNull(options);
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         var configuredOptions = options.Value;
-        _webPubSubHost = new Uri(configuredOptions.WebPubSubEndpoint, UriKind.Absolute).Host;
-        _upstreamAccessKeys = configuredOptions.WebPubSubUpstreamAccessKeys
-            .Where(key => !string.IsNullOrWhiteSpace(key))
-            .Select(key => key.Trim())
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
+        _webPubSubHost = ResolveHost(configuredOptions.ConnectionString);
+        _upstreamAccessKeys = ResolveConnectionStringValues(configuredOptions.ConnectionString, "AccessKey");
         _trustedPrincipalIds = configuredOptions.TrustedUpstreamPrincipalIds
             .Where(principalId => !string.IsNullOrWhiteSpace(principalId))
             .Select(principalId => principalId.Trim())
@@ -45,7 +41,7 @@ public sealed class WebPubSubUpstreamAuthenticator
             .ToArray();
     }
 
-    public bool TryAuthenticate(HttpHeadersCollection headers, out string failureMessage)
+    public bool TryAuthenticate(IHeaderDictionary headers, out string failureMessage)
     {
         ArgumentNullException.ThrowIfNull(headers);
 
@@ -74,8 +70,15 @@ public sealed class WebPubSubUpstreamAuthenticator
         return false;
     }
 
-    private bool HasExpectedOrigin(HttpHeadersCollection headers, out string failureMessage)
+    private bool HasExpectedOrigin(IHeaderDictionary headers, out string failureMessage)
     {
+        if (string.IsNullOrWhiteSpace(_webPubSubHost))
+        {
+            failureMessage =
+                "Azure Web PubSub upstream validation requires AzureWebPubSub:ConnectionString to include a valid Endpoint.";
+            return false;
+        }
+
         var originHosts = GetHeaderList(headers, WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName);
         if (originHosts.Count == 0)
         {
@@ -89,13 +92,12 @@ public sealed class WebPubSubUpstreamAuthenticator
             return true;
         }
 
-        failureMessage =
-            $"Azure Web PubSub upstream requests must originate from {_webPubSubHost}.";
+        failureMessage = $"Azure Web PubSub upstream requests must originate from {_webPubSubHost}.";
         return false;
     }
 
     private bool TryAuthenticateManagedIdentity(
-        HttpHeadersCollection headers,
+        IHeaderDictionary headers,
         out bool attempted,
         out string failureMessage)
     {
@@ -108,14 +110,14 @@ public sealed class WebPubSubUpstreamAuthenticator
 
         if (!CanTrustEasyAuthBoundary())
         {
-            failureMessage = "Easy Auth headers are only trusted inside the Azure Functions host boundary.";
+            failureMessage = "Easy Auth headers are only trusted inside the broker host boundary.";
             return false;
         }
 
         if (_trustedPrincipalIds.Length == 0)
         {
             failureMessage =
-                "Managed identity upstream validation requires Functions:TrustedUpstreamPrincipalIds to be configured.";
+                "Managed identity upstream validation requires AzureWebPubSub:TrustedUpstreamPrincipalIds to be configured.";
             return false;
         }
 
@@ -137,12 +139,12 @@ public sealed class WebPubSubUpstreamAuthenticator
         return false;
     }
 
-    private bool TryAuthenticateSignature(HttpHeadersCollection headers, out string failureMessage)
+    private bool TryAuthenticateSignature(IHeaderDictionary headers, out string failureMessage)
     {
         if (_upstreamAccessKeys.Length == 0)
         {
             failureMessage =
-                "Signature validation requires Functions:WebPubSubUpstreamAccessKeys to be configured.";
+                "Signature validation requires AzureWebPubSub:ConnectionString to include an AccessKey.";
             return false;
         }
 
@@ -178,7 +180,7 @@ public sealed class WebPubSubUpstreamAuthenticator
     }
 
     private static bool TryResolvePrincipalId(
-        HttpHeadersCollection headers,
+        IHeaderDictionary headers,
         out string principalId,
         out string failureMessage)
     {
@@ -207,8 +209,7 @@ public sealed class WebPubSubUpstreamAuthenticator
 
         if (!IsSafeTrustedPrincipal(principalId))
         {
-            failureMessage =
-                "The authenticated upstream principal identifier contains unsupported characters.";
+            failureMessage = "The authenticated upstream principal identifier contains unsupported characters.";
             return false;
         }
 
@@ -217,7 +218,7 @@ public sealed class WebPubSubUpstreamAuthenticator
     }
 
     private static bool TryReadPrincipalPayload(
-        HttpHeadersCollection headers,
+        IHeaderDictionary headers,
         out string? principalId,
         out string failureMessage)
     {
@@ -252,6 +253,41 @@ public sealed class WebPubSubUpstreamAuthenticator
         }
     }
 
+    private static string ResolveHost(string? connectionString)
+    {
+        var endpoint = ResolveConnectionStringValues(connectionString, "Endpoint").FirstOrDefault();
+        return Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri)
+            ? endpointUri.Host
+            : string.Empty;
+    }
+
+    private static string[] ResolveConnectionStringValues(string? connectionString, string key)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return [];
+        }
+
+        return connectionString
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part =>
+            {
+                var separatorIndex = part.IndexOf('=');
+                if (separatorIndex <= 0)
+                {
+                    return (Key: string.Empty, Value: string.Empty);
+                }
+
+                return (
+                    Key: part[..separatorIndex].Trim(),
+                    Value: part[(separatorIndex + 1)..].Trim());
+            })
+            .Where(part => string.Equals(part.Key, key, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(part.Value))
+            .Select(part => part.Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
+
     private static string? GetClaimValue(IReadOnlyCollection<ClientPrincipalClaim>? claims, string type) =>
         claims?.FirstOrDefault(claim => claim.Type.Equals(type, StringComparison.OrdinalIgnoreCase))?.Value;
 
@@ -270,9 +306,9 @@ public sealed class WebPubSubUpstreamAuthenticator
                CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
     }
 
-    private static bool HasEasyAuthHeaders(HttpHeadersCollection headers) =>
-        headers.Contains(ClientPrincipalIdHeaderName) ||
-        headers.Contains(ClientPrincipalHeaderName);
+    private static bool HasEasyAuthHeaders(IHeaderDictionary headers) =>
+        headers.ContainsKey(ClientPrincipalIdHeaderName) ||
+        headers.ContainsKey(ClientPrincipalHeaderName);
 
     private static bool CanTrustEasyAuthBoundary() =>
         !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(WebsiteInstanceIdEnvironmentVariable));
@@ -286,17 +322,17 @@ public sealed class WebPubSubUpstreamAuthenticator
         return remainder == 0 ? value : value.PadRight(value.Length + (4 - remainder), '=');
     }
 
-    private static string? GetHeaderValue(HttpHeadersCollection headers, string headerName) =>
-        headers.TryGetValues(headerName, out var values)
+    private static string? GetHeaderValue(IHeaderDictionary headers, string headerName) =>
+        headers.TryGetValue(headerName, out var values)
             ? values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
             : null;
 
-    private static IReadOnlyList<string> GetHeaderList(HttpHeadersCollection headers, params string[] headerNames)
+    private static IReadOnlyList<string> GetHeaderList(IHeaderDictionary headers, params string[] headerNames)
     {
         var values = new List<string>();
         foreach (var headerName in headerNames)
         {
-            if (!headers.TryGetValues(headerName, out var headerValues))
+            if (!headers.TryGetValue(headerName, out var headerValues))
             {
                 continue;
             }
@@ -304,7 +340,7 @@ public sealed class WebPubSubUpstreamAuthenticator
             foreach (var headerValue in headerValues)
             {
                 values.AddRange(
-                    headerValue
+                    (headerValue ?? string.Empty)
                         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                         .Where(value => !string.IsNullOrWhiteSpace(value)));
             }

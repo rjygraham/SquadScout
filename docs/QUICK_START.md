@@ -24,7 +24,7 @@ All services start; dashboard at `http://localhost:18888`.
 
 ## First Steps
 
-> Mobile clients do not call these HTTP endpoints directly for project list and session start anymore. This branch moves those broker control operations onto Azure Web PubSub; the REST endpoints below remain for local admin/testing while the remaining live-session routing follow-up is completed.
+> Mobile clients use Azure Web PubSub for broker control, live input, replay recovery, and output streaming. The REST endpoints below remain for local admin/testing; the Azure Function only handles authentication and token negotiation.
 
 ### 1. Verify Broker is Running
 

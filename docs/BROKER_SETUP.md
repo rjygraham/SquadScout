@@ -123,7 +123,8 @@ dotnet run \
 {
   "AzureWebPubSub": {
     "Hub": "squadscout",
-    "ConnectionString": ""
+    "ConnectionString": "",
+    "TrustedUpstreamPrincipalIds": []
   }
 }
 ```
@@ -132,6 +133,7 @@ dotnet run \
 |---------|------|---------|-------|
 | `Hub` | string | `squadscout` | Web PubSub hub name. Must match negotiation endpoint. |
 | `ConnectionString` | string | `""` (empty) | Azure Web PubSub connection string. If empty, relay is disabled (NullRelayPublisher used). |
+| `TrustedUpstreamPrincipalIds` | string[] | `[]` | Optional Easy Auth allow-list for Azure Web PubSub upstream webhook delivery to `/api/upstream`. |
 
 **To enable Azure Web PubSub:**
 
@@ -145,13 +147,16 @@ dotnet run \
 
    Or in `appsettings.Development.json`:
 
-   ```json
-   {
-     "AzureWebPubSub": {
-       "ConnectionString": "Endpoint=https://...; AccessKey=..."
-     }
-   }
-   ```
+    ```json
+    {
+      "AzureWebPubSub": {
+        "ConnectionString": "Endpoint=https://...; AccessKey=...",
+        "TrustedUpstreamPrincipalIds": [
+          "<web-pubsub-managed-identity-object-id>"
+        ]
+      }
+    }
+    ```
 
 **Without Web PubSub:**
 - Broker runs in **standalone mode**.
@@ -207,15 +212,20 @@ See `src/SquadScout.Broker/Program.cs` for endpoint definitions.
 - **Send Input:** `POST /api/sessions/{sessionId}/input`
   - Request body: `MessageEnvelope<InputChunkPayload>` with sequence metadata
   - Returns: Sequence validation result (Accepted/Duplicate/GapDetected/Conflict)
+  - Usage: Local admin/testing path; mobile operational traffic uses Azure Web PubSub instead
+
+- **Azure Web PubSub Upstream:** `POST /api/upstream`
+  - Request body: Azure Web PubSub custom event envelope (`session-input` or `session-replay`)
+  - Returns: `204 No Content` on accepted live input/replay handling, or JSON error/validation details on rejection
   
 - **Get Session Telemetry:** `GET /api/sessions/{sessionId}/telemetry`
   - Returns: Diagnostic snapshot including sequence state and message buffer (Phase 1)
 
-See `src/SquadScout.Broker/Program.cs` for endpoint implementations. Project list, session start, and session status requests from the mobile app now use the Web PubSub broker control channel; live input still uses the current upstream bridge until the remaining direct session-routing work lands.
+See `src/SquadScout.Broker/Program.cs` for endpoint implementations. Mobile project list, session start, session status, live input, replay recovery, and broker output all run over Azure Web PubSub. The broker-owned HTTP endpoints remain for local admin/testing and for Azure Web PubSub upstream webhooks only.
 
 ### WebSocket Support (Phase 2)
 
-**Phase 1 Status:** No broker-owned HTTP WebSocket endpoints are implemented. This branch moves mobile broker control requests (project list, session start, session status) onto Azure Web PubSub. Live session input still uses the current upstream bridge while the remaining direct session-routing work is completed.
+**Phase 1 Status:** No broker-owned client-facing HTTP WebSocket endpoints are implemented. Mobile broker control requests, live input, replay recovery, and broker output all ride Azure Web PubSub. The broker only exposes `/api/upstream` for Azure Web PubSub webhook delivery plus local admin/testing REST APIs.
 
 ## Project Registration
 

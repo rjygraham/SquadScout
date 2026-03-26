@@ -67,6 +67,8 @@ builder.Services.AddSingleton<ISessionRelay, InMemorySessionRelay>();
 builder.Services.AddSingleton<ISequenceValidator, SessionSequenceValidator>();
 builder.Services.AddSingleton<ISessionOrchestrator, InMemorySessionOrchestrator>();
 builder.Services.AddSingleton<BrokerControlMessageHandler>();
+builder.Services.AddSingleton<WebPubSubUpstreamAuthenticator>();
+builder.Services.AddSingleton<WebPubSubUpstreamHandler>();
 builder.Services.AddHostedService<BrokerControlChannelService>();
 
 var app = builder.Build();
@@ -88,6 +90,35 @@ app.MapGet("/", () => Results.Ok(new
 }));
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+
+app.MapMethods("/api/upstream", ["POST", "OPTIONS"], async (
+    HttpContext context,
+    WebPubSubUpstreamHandler handler,
+    CancellationToken cancellationToken) =>
+{
+    var response = await handler.HandleAsync(
+            context.Request.Method,
+            context.Request.Headers,
+            context.Request.Body,
+            cancellationToken)
+        .ConfigureAwait(false);
+
+    if (!string.IsNullOrWhiteSpace(response.AllowedOrigin))
+    {
+        context.Response.Headers[WebPubSubUpstreamHandler.WebHookAllowedOriginHeaderName] = response.AllowedOrigin;
+    }
+
+    if (!string.IsNullOrWhiteSpace(response.ContentType))
+    {
+        context.Response.ContentType = response.ContentType;
+    }
+
+    context.Response.StatusCode = (int)response.StatusCode;
+    if (!string.IsNullOrWhiteSpace(response.Body))
+    {
+        await context.Response.WriteAsync(response.Body, cancellationToken).ConfigureAwait(false);
+    }
+});
 
 app.MapGet("/api/projects", async (IProjectCatalog catalog, CancellationToken cancellationToken) =>
 {

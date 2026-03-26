@@ -1,14 +1,17 @@
-using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using SquadScout.Functions.Configuration;
+using SquadScout.Broker.Configuration;
+using SquadScout.Broker.Realtime;
+using SquadScout.Broker.Relay;
+using SquadScout.Broker.Sessions;
+using SquadScout.Broker.Tests.TestDoubles;
 using SquadScout.Contracts.Messages;
 using SquadScout.Contracts.Realtime;
-using SquadScout.Functions.Upstream;
+using SquadScout.Contracts.Sessions;
 
 namespace SquadScout.Broker.Tests;
 
@@ -21,67 +24,52 @@ public sealed class PubSubUpstreamHandlerTests
     private const string UpstreamAccessKey = "test-access-key";
 
     [Fact]
-    public async Task HandleAsyncForSessionInputEventForwardsEnvelopeToBrokerInputEndpoint()
+    public async Task HandleAsyncForSessionInputEventRelaysEnvelopeToSessionRelay()
     {
-        HttpRequestMessage? capturedRequest = null;
-        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
-        {
-            capturedRequest = request;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(
-                    JsonSerializer.Serialize(
-                        new
-                        {
-                            status = "accepted"
-                        },
-                        SessionMessageSerializer.DefaultOptions),
-                    Encoding.UTF8,
-                    "application/json")
-            });
-        }))
-        {
-            BaseAddress = new Uri("http://127.0.0.1:5071")
-        };
-
-        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
-        var envelope = CreateInputEnvelope();
-        using var body = CreateJsonBody(envelope);
+        var relay = new RecordingSessionRelay();
+        var handler = CreateHandler(relay: relay);
+        using var body = CreateJsonBody(CreateInputEnvelope());
         var headers = CreateSignedHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}");
 
         var response = await handler.HandleAsync("POST", headers, body, CancellationToken.None);
 
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, response.StatusCode);
         Assert.Equal(WebPubSubOrigin, response.AllowedOrigin);
         Assert.Null(response.Body);
-        Assert.NotNull(capturedRequest);
-        Assert.Equal("http://127.0.0.1:5071/api/sessions/session-abc/input", capturedRequest!.RequestUri!.ToString());
-
-        var forwardedJson = await capturedRequest.Content!.ReadAsStringAsync();
-        var forwardedEnvelope = JsonSerializer.Deserialize<MessageEnvelope<InputChunkPayload>>(
-            forwardedJson,
-            SessionMessageSerializer.DefaultOptions);
-
-        Assert.NotNull(forwardedEnvelope);
-        Assert.Equal(envelope.SessionId, forwardedEnvelope!.SessionId);
-        Assert.Equal(envelope.ProjectId, forwardedEnvelope.ProjectId);
-        Assert.Equal(envelope.Payload.Content, forwardedEnvelope.Payload!.Content);
+        Assert.NotNull(relay.LastInputEnvelope);
+        Assert.Equal("session-abc", relay.LastInputEnvelope!.SessionId);
+        Assert.Equal("broker", relay.LastInputEnvelope.ProjectId);
+        Assert.Equal("status --json\n", relay.LastInputEnvelope.Payload!.Content);
     }
 
     [Fact]
-    public async Task HandleAsyncRejectsMalformedInputEnvelopeWithoutCallingBroker()
+    public async Task HandleAsyncForReplayRequestEventPublishesReplayResponseToSessionGroup()
     {
-        var brokerCalled = false;
-        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
-        {
-            brokerCalled = true;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
-        }))
-        {
-            BaseAddress = new Uri("http://127.0.0.1:5071")
-        };
+        var publisher = new RecordingRelayPublisher();
+        var orchestrator = new RecordingSessionOrchestrator();
+        var handler = CreateHandler(orchestrator: orchestrator, publisher: publisher);
+        var request = CreateReplayRequestEnvelope();
+        orchestrator.ReplayResponse = CreateReplayResponseEnvelope(request);
+        using var body = CreateJsonBody(request);
+        var headers = CreateSignedHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.ReplayRequest}");
 
-        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
+        var response = await handler.HandleAsync("POST", headers, body, CancellationToken.None);
+
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, response.StatusCode);
+        Assert.NotNull(orchestrator.LastReplayRequest);
+        Assert.Equal(request.MessageId, orchestrator.LastReplayRequest!.MessageId);
+
+        var published = Assert.Single(publisher.PublishedEnvelopes);
+        Assert.Equal(SessionMessageType.ReplayResponse, published.MessageType);
+        Assert.Equal(request.CorrelationId, published.CorrelationId);
+        Assert.Equal(request.MessageId, published.CausationId);
+    }
+
+    [Fact]
+    public async Task HandleAsyncRejectsMalformedInputEnvelopeWithoutCallingRelay()
+    {
+        var relay = new RecordingSessionRelay();
+        var handler = CreateHandler(relay: relay);
         using var body = CreateJsonBody(new
         {
             projectId = "broker",
@@ -101,25 +89,16 @@ public sealed class PubSubUpstreamHandlerTests
             body,
             CancellationToken.None);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("input envelope", response.Body, StringComparison.OrdinalIgnoreCase);
-        Assert.False(brokerCalled);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("input or replay-request envelope", response.Body, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(relay.LastInputEnvelope);
     }
 
     [Fact]
     public async Task HandleAsyncRejectsEnvelopeThatCannotMapToPhaseOneSessionGroup()
     {
-        var brokerCalled = false;
-        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
-        {
-            brokerCalled = true;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
-        }))
-        {
-            BaseAddress = new Uri("http://127.0.0.1:5071")
-        };
-
-        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
+        var relay = new RecordingSessionRelay();
+        var handler = CreateHandler(relay: relay);
         var envelope = CreateInputEnvelope() with
         {
             ProjectId = "broker:west"
@@ -132,57 +111,41 @@ public sealed class PubSubUpstreamHandlerTests
             body,
             CancellationToken.None);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("Phase 1 session group", response.Body, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("projectId", response.Body, StringComparison.Ordinal);
-        Assert.False(brokerCalled);
+        Assert.Null(relay.LastInputEnvelope);
     }
 
     [Fact]
     public async Task HandleAsyncReturnsWebhookValidationHeadersForOptionsRequests()
     {
-        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
-        {
-            throw new InvalidOperationException("The broker should not be called for webhook validation.");
-        }))
-        {
-            BaseAddress = new Uri("http://127.0.0.1:5071")
-        };
-
-        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
+        var handler = CreateHandler();
         using var body = CreateJsonBody(new { });
         var headers = CreateHeaders();
         headers.Add(WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName, WebPubSubOrigin);
 
         var response = await handler.HandleAsync("OPTIONS", headers, body, CancellationToken.None);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(WebPubSubOrigin, response.AllowedOrigin);
     }
 
     [Fact]
-    public async Task HandleAsyncSurfacesBrokerConflictsBackToWebPubSub()
+    public async Task HandleAsyncSurfacesValidationConflictsBackToWebPubSub()
     {
-        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
+        var relay = new RecordingSessionRelay
         {
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Conflict)
+            ValidationResult = new SequenceValidationResult
             {
-                Content = new StringContent(
-                    JsonSerializer.Serialize(
-                        new
-                        {
-                            status = "gapDetected"
-                        },
-                        SessionMessageSerializer.DefaultOptions),
-                    Encoding.UTF8,
-                    "application/json")
-            });
-        }))
-        {
-            BaseAddress = new Uri("http://127.0.0.1:5071")
+                Status = SequenceValidationStatus.StaleGeneration,
+                Generation = 2,
+                ClientSequence = 4,
+                Reason = "generation mismatch"
+            }
         };
 
-        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
+        var handler = CreateHandler(relay: relay);
         using var body = CreateJsonBody(CreateInputEnvelope());
 
         var response = await handler.HandleAsync(
@@ -191,49 +154,16 @@ public sealed class PubSubUpstreamHandlerTests
             body,
             CancellationToken.None);
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
         Assert.Equal("application/json", response.ContentType);
-        Assert.Contains("gapDetected", response.Body, StringComparison.Ordinal);
+        Assert.Contains("generation mismatch", response.Body, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task HandleAsyncReturnsServiceUnavailableWhenBrokerForwardingThrows()
+    public async Task HandleAsyncRejectsMissingSignatureWithoutCallingRelay()
     {
-        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
-        {
-            throw new HttpRequestException("connection refused");
-        }))
-        {
-            BaseAddress = new Uri("http://127.0.0.1:5071")
-        };
-
-        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
-        using var body = CreateJsonBody(CreateInputEnvelope());
-
-        var response = await handler.HandleAsync(
-            "POST",
-            CreateSignedHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}"),
-            body,
-            CancellationToken.None);
-
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        Assert.Contains("unavailable", response.Body, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task HandleAsyncRejectsMissingSignatureWithoutCallingBroker()
-    {
-        var brokerCalled = false;
-        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
-        {
-            brokerCalled = true;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
-        }))
-        {
-            BaseAddress = new Uri("http://127.0.0.1:5071")
-        };
-
-        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
+        var relay = new RecordingSessionRelay();
+        var handler = CreateHandler(relay: relay);
         using var body = CreateJsonBody(CreateInputEnvelope());
         var headers = CreateHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}");
         headers.Add(WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName, WebPubSubOrigin);
@@ -241,25 +171,16 @@ public sealed class PubSubUpstreamHandlerTests
 
         var response = await handler.HandleAsync("POST", headers, body, CancellationToken.None);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Contains("signature", response.Body, StringComparison.OrdinalIgnoreCase);
-        Assert.False(brokerCalled);
+        Assert.Null(relay.LastInputEnvelope);
     }
 
     [Fact]
-    public async Task HandleAsyncRejectsInvalidSignatureWithoutCallingBroker()
+    public async Task HandleAsyncRejectsInvalidSignatureWithoutCallingRelay()
     {
-        var brokerCalled = false;
-        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
-        {
-            brokerCalled = true;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
-        }))
-        {
-            BaseAddress = new Uri("http://127.0.0.1:5071")
-        };
-
-        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
+        var relay = new RecordingSessionRelay();
+        var handler = CreateHandler(relay: relay);
         using var body = CreateJsonBody(CreateInputEnvelope());
         var headers = CreateHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}");
         headers.Add(WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName, WebPubSubOrigin);
@@ -268,25 +189,16 @@ public sealed class PubSubUpstreamHandlerTests
 
         var response = await handler.HandleAsync("POST", headers, body, CancellationToken.None);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Contains("signature", response.Body, StringComparison.OrdinalIgnoreCase);
-        Assert.False(brokerCalled);
+        Assert.Null(relay.LastInputEnvelope);
     }
 
     [Fact]
     public async Task HandleAsyncAcceptsWebHookSignatureAlias()
     {
-        HttpRequestMessage? capturedRequest = null;
-        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
-        {
-            capturedRequest = request;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
-        }))
-        {
-            BaseAddress = new Uri("http://127.0.0.1:5071")
-        };
-
-        var handler = CreateHandler(httpClient, CreateOptionsWithAccessKey());
+        var relay = new RecordingSessionRelay();
+        var handler = CreateHandler(relay: relay);
         using var body = CreateJsonBody(CreateInputEnvelope());
         var headers = CreateHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}");
         headers.Add(WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName, WebPubSubOrigin);
@@ -297,31 +209,22 @@ public sealed class PubSubUpstreamHandlerTests
 
         var response = await handler.HandleAsync("POST", headers, body, CancellationToken.None);
 
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-        Assert.NotNull(capturedRequest);
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, response.StatusCode);
+        Assert.NotNull(relay.LastInputEnvelope);
     }
 
     [Fact]
     public async Task HandleAsyncAcceptsTrustedManagedIdentityRequestWithoutSignature()
     {
-        HttpRequestMessage? capturedRequest = null;
-        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
-        {
-            capturedRequest = request;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
-        }))
-        {
-            BaseAddress = new Uri("http://127.0.0.1:5071")
-        };
-
+        var relay = new RecordingSessionRelay();
         var handler = CreateHandler(
-            httpClient,
-            new FunctionsHostOptions
+            relay: relay,
+            options: new AzureWebPubSubOptions
             {
-                WebPubSubEndpoint = $"https://{WebPubSubOrigin}",
-                BrokerBaseUrl = "http://127.0.0.1:5071",
+                ConnectionString = CreateConnectionString(),
                 TrustedUpstreamPrincipalIds = [TrustedUpstreamPrincipalId]
             });
+
         using var body = CreateJsonBody(CreateInputEnvelope());
         var headers = CreateHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}");
         headers.Add(WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName, WebPubSubOrigin);
@@ -332,31 +235,22 @@ public sealed class PubSubUpstreamHandlerTests
             "trusted-boundary",
             () => handler.HandleAsync("POST", headers, body, CancellationToken.None));
 
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-        Assert.NotNull(capturedRequest);
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, response.StatusCode);
+        Assert.NotNull(relay.LastInputEnvelope);
     }
 
     [Fact]
     public async Task HandleAsyncRejectsUntrustedManagedIdentityRequest()
     {
-        var brokerCalled = false;
-        using var httpClient = new HttpClient(new DelegateHttpMessageHandler((request, cancellationToken) =>
-        {
-            brokerCalled = true;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
-        }))
-        {
-            BaseAddress = new Uri("http://127.0.0.1:5071")
-        };
-
+        var relay = new RecordingSessionRelay();
         var handler = CreateHandler(
-            httpClient,
-            new FunctionsHostOptions
+            relay: relay,
+            options: new AzureWebPubSubOptions
             {
-                WebPubSubEndpoint = $"https://{WebPubSubOrigin}",
-                BrokerBaseUrl = "http://127.0.0.1:5071",
+                ConnectionString = CreateConnectionString(),
                 TrustedUpstreamPrincipalIds = [TrustedUpstreamPrincipalId]
             });
+
         using var body = CreateJsonBody(CreateInputEnvelope());
         var headers = CreateHeaders($"azure.webpubsub.user.{SessionUpstreamEventNames.Input}");
         headers.Add(WebPubSubUpstreamHandler.WebHookRequestOriginHeaderName, WebPubSubOrigin);
@@ -367,22 +261,28 @@ public sealed class PubSubUpstreamHandlerTests
             "trusted-boundary",
             () => handler.HandleAsync("POST", headers, body, CancellationToken.None));
 
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Contains("principal", response.Body, StringComparison.OrdinalIgnoreCase);
-        Assert.False(brokerCalled);
+        Assert.Null(relay.LastInputEnvelope);
     }
 
-    private static WebPubSubUpstreamHandler CreateHandler(HttpClient httpClient, FunctionsHostOptions? options = null) =>
+    private static WebPubSubUpstreamHandler CreateHandler(
+        RecordingSessionRelay? relay = null,
+        RecordingSessionOrchestrator? orchestrator = null,
+        RecordingRelayPublisher? publisher = null,
+        AzureWebPubSubOptions? options = null) =>
         new(
             new WebPubSubUpstreamAuthenticator(
                 Options.Create(options ?? CreateOptionsWithAccessKey()),
                 NullLogger<WebPubSubUpstreamAuthenticator>.Instance),
-            new BrokerInputForwarder(httpClient),
+            relay ?? new RecordingSessionRelay(),
+            orchestrator ?? new RecordingSessionOrchestrator(),
+            publisher ?? new RecordingRelayPublisher(),
             NullLogger<WebPubSubUpstreamHandler>.Instance);
 
-    private static HttpHeadersCollection CreateHeaders(string? cloudEventType = null)
+    private static HeaderDictionary CreateHeaders(string? cloudEventType = null)
     {
-        var headers = new HttpHeadersCollection();
+        var headers = new HeaderDictionary();
         if (!string.IsNullOrWhiteSpace(cloudEventType))
         {
             headers.Add(WebPubSubUpstreamHandler.CloudEventTypeHeaderName, cloudEventType);
@@ -391,7 +291,7 @@ public sealed class PubSubUpstreamHandlerTests
         return headers;
     }
 
-    private static HttpHeadersCollection CreateSignedHeaders(
+    private static HeaderDictionary CreateSignedHeaders(
         string cloudEventType,
         string connectionId = "conn-123")
     {
@@ -422,15 +322,80 @@ public sealed class PubSubUpstreamHandlerTests
             {
                 Content = "status --json\n"
             }
-         };
+        };
 
-    private static FunctionsHostOptions CreateOptionsWithAccessKey() =>
+    private static MessageEnvelope<ReplayRequestPayload> CreateReplayRequestEnvelope() =>
         new()
         {
-            WebPubSubEndpoint = $"https://{WebPubSubOrigin}",
-            BrokerBaseUrl = "http://127.0.0.1:5071",
-            WebPubSubUpstreamAccessKeys = [UpstreamAccessKey]
+            ProjectId = "broker",
+            SessionId = "session-abc",
+            Generation = SessionEnvelopeContract.InitialGeneration,
+            MessageType = SessionMessageType.ReplayRequest,
+            Direction = MessageDirection.ClientToBroker,
+            ClientSequence = 2,
+            AcknowledgedSequence = 1,
+            MessageId = "client-replay-1",
+            CorrelationId = "corr-replay",
+            Payload = new ReplayRequestPayload
+            {
+                FromSequenceInclusive = 2,
+                Reason = ReplayRequestReason.GapDetected
+            }
         };
+
+    private static MessageEnvelope<ReplayResponsePayload> CreateReplayResponseEnvelope(MessageEnvelope<ReplayRequestPayload> request) =>
+        new()
+        {
+            ProjectId = request.ProjectId,
+            SessionId = request.SessionId,
+            Generation = request.Generation,
+            MessageType = SessionMessageType.ReplayResponse,
+            Direction = MessageDirection.BrokerToClient,
+            AcknowledgedSequence = request.AcknowledgedSequence,
+            MessageId = "broker-replay-1",
+            CorrelationId = request.CorrelationId,
+            CausationId = request.MessageId,
+            Payload = new ReplayResponsePayload
+            {
+                Generation = request.Generation,
+                FromSequenceInclusive = 2,
+                ToSequenceInclusive = 2,
+                AvailableFromSequence = 1,
+                AvailableToSequence = 2,
+                GapDetected = false,
+                HasMore = false,
+                IsComplete = true,
+                Messages =
+                [
+                    new MessageEnvelope<JsonElement>
+                    {
+                        ProjectId = request.ProjectId,
+                        SessionId = request.SessionId,
+                        Generation = request.Generation,
+                        MessageType = SessionMessageType.Output,
+                        Direction = MessageDirection.BrokerToClient,
+                        Sequence = 2,
+                        MessageId = "output-2",
+                        Payload = JsonSerializer.SerializeToElement(
+                            new OutputChunkPayload
+                            {
+                                Content = "resumed-output",
+                                IsError = false
+                            },
+                            SessionMessageSerializer.DefaultOptions)
+                    }
+                ]
+            }
+        };
+
+    private static AzureWebPubSubOptions CreateOptionsWithAccessKey() =>
+        new()
+        {
+            ConnectionString = CreateConnectionString()
+        };
+
+    private static string CreateConnectionString() =>
+        $"Endpoint=https://{WebPubSubOrigin};AccessKey={UpstreamAccessKey};Version=1.0;";
 
     private static string ComputeSignature(string accessKey, string connectionId)
     {
@@ -456,16 +421,90 @@ public sealed class PubSubUpstreamHandlerTests
         }
     }
 
-    private sealed class DelegateHttpMessageHandler : HttpMessageHandler
+    private sealed class RecordingSessionRelay : ISessionRelay
     {
-        private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _handler;
-
-        public DelegateHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler)
+        public SequenceValidationResult ValidationResult { get; set; } = new()
         {
-            _handler = handler;
+            Status = SequenceValidationStatus.Accepted,
+            Generation = SessionEnvelopeContract.InitialGeneration,
+            ClientSequence = 1
+        };
+
+        public MessageEnvelope<InputChunkPayload>? LastInputEnvelope { get; private set; }
+
+        public Task<SessionDescriptor> StartAsync(StartSessionCommand command, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<SessionDescriptor> StopAsync(string sessionId, StopSessionCommand command, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<SequenceValidationResult> RelayInputAsync(
+            string sessionId,
+            MessageEnvelope<InputChunkPayload> envelope,
+            CancellationToken cancellationToken = default)
+        {
+            LastInputEnvelope = envelope;
+            return Task.FromResult(ValidationResult);
+        }
+    }
+
+    private sealed class RecordingSessionOrchestrator : ISessionOrchestrator
+    {
+        public MessageEnvelope<ReplayRequestPayload>? LastReplayRequest { get; private set; }
+
+        public MessageEnvelope<ReplayResponsePayload> ReplayResponse { get; set; } = new()
+        {
+            ProjectId = "broker",
+            SessionId = "session-abc",
+            Generation = SessionEnvelopeContract.InitialGeneration,
+            MessageType = SessionMessageType.ReplayResponse,
+            Direction = MessageDirection.BrokerToClient,
+            MessageId = "replay-response",
+            Payload = new ReplayResponsePayload
+            {
+                Generation = SessionEnvelopeContract.InitialGeneration,
+                Messages = []
+            }
+        };
+
+        public Task<SessionDescriptor?> GetAsync(string sessionId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<SessionDescriptor> StartAsync(StartSessionCommand command, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<MessageEnvelope<TPayload>> RecordBrokerMessageAsync<TPayload>(
+            string sessionId,
+            BrokerEnvelopeCommand<TPayload> command,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<SequenceValidationResult> ValidateClientMessageAsync<TPayload>(
+            string sessionId,
+            MessageEnvelope<TPayload> envelope,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<SequenceValidationResult> AcceptClientMessageAsync<TPayload>(
+            string sessionId,
+            MessageEnvelope<TPayload> envelope,
+            Func<MessageEnvelope<TPayload>, CancellationToken, Task> onAcceptedAsync,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<MessageEnvelope<ReplayResponsePayload>> ReplayAsync(
+            string sessionId,
+            MessageEnvelope<ReplayRequestPayload> request,
+            CancellationToken cancellationToken = default)
+        {
+            LastReplayRequest = request;
+            return Task.FromResult(ReplayResponse);
         }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            _handler(request, cancellationToken);
+        public Task<SessionTelemetrySnapshot> ExportTelemetryAsync(string sessionId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<long> ResetGenerationAsync(string sessionId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 }
