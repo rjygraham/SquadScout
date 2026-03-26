@@ -216,10 +216,7 @@ public sealed class GrainBackedSessionOrchestrator : ISessionOrchestrator
 
     private void RemoveClientMessageGate(string sessionId)
     {
-        if (_clientMessageGates.TryRemove(sessionId, out var gate))
-        {
-            gate.Dispose();
-        }
+        _clientMessageGates.TryRemove(sessionId, out _);
     }
 
     private static bool IsStoppedLifecycleEnvelope<TPayload>(MessageEnvelope<TPayload> envelope) =>
