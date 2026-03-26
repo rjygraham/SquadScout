@@ -460,6 +460,92 @@ public sealed class PubSubConnectionServiceTests
     }
 
     [Fact]
+    public async Task HeartbeatTimeoutDuringClientRecoveryPreservesReplayCursorAcrossReconnect()
+    {
+        var session = CreateSession();
+        var clock = new MutableClock(new DateTimeOffset(2026, 03, 26, 10, 05, 00, TimeSpan.Zero));
+        var delay = new ControlledDelay();
+        var firstSocket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-recovery-1")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        var secondSocket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-recovery-2")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        await using var service = CreateService(
+            new RecordingNegotiationClient(CreateNegotiationResponse(session, refreshAtUtc: DateTimeOffset.MinValue)),
+            clock.GetUtcNow,
+            delay.DelayAsync,
+            firstSocket,
+            secondSocket);
+
+        await service.PrepareForSessionAsync(session, new MessageConnectionResumeState
+        {
+            Generation = 2,
+            AcknowledgedSequence = 5
+        });
+        await WaitForAsync(() => firstSocket.SentTexts.Count >= 2);
+
+        firstSocket.EnqueueIncoming(GroupMessage(CreateBrokerHeartbeatEnvelope(
+            session,
+            nonce: "nonce-recovery",
+            timeoutSeconds: 3,
+            generation: 2)));
+        await WaitForAsync(() => delay.RequestedDelays.Count == 1 && firstSocket.SentTexts.Count >= 3);
+
+        using (var heartbeatCommand = JsonDocument.Parse(firstSocket.SentTexts[2]))
+        {
+            var heartbeatEnvelope = heartbeatCommand.RootElement.GetProperty("data")
+                .Deserialize<MessageEnvelope<HeartbeatPayload>>(SessionMessageSerializer.DefaultOptions);
+
+            Assert.NotNull(heartbeatEnvelope);
+            Assert.Equal(2, heartbeatEnvelope!.Generation);
+            Assert.Equal(5, heartbeatEnvelope.AcknowledgedSequence);
+            Assert.True(heartbeatEnvelope.Payload.ReplayRequested);
+            Assert.Equal("nonce-recovery", heartbeatEnvelope.Payload.AcknowledgedNonce);
+        }
+
+        clock.Advance(TimeSpan.FromSeconds(4));
+        delay.ReleaseNext();
+        await WaitForAsync(() => service.CurrentStatus.State == MessageConnectionState.Faulted);
+
+        var reconnectStatus = await service.ReconnectAsync();
+        await WaitForAsync(() => secondSocket.SentTexts.Count >= 2);
+
+        using var replayCommand = JsonDocument.Parse(secondSocket.SentTexts[1]);
+        var replayRequest = replayCommand.RootElement.GetProperty("data")
+            .Deserialize<MessageEnvelope<ReplayRequestPayload>>(SessionMessageSerializer.DefaultOptions);
+
+        Assert.NotNull(replayRequest);
+        Assert.Equal(MessageConnectionState.Connected, reconnectStatus.State);
+        Assert.Equal(ReplayRequestReason.ReconnectResume, replayRequest!.Payload.Reason);
+        Assert.Equal(2, replayRequest.Generation);
+        Assert.Equal(5, replayRequest.AcknowledgedSequence);
+        Assert.Equal(6, replayRequest.Payload.FromSequenceInclusive);
+    }
+
+    [Fact]
     public async Task PrepareForSessionAsync_WithResumeStateRequestsClientRecoveryReplay()
     {
         var session = CreateSession();
@@ -822,6 +908,79 @@ public sealed class PubSubConnectionServiceTests
 
         Assert.NotNull(envelope);
         Assert.Equal(2, envelope!.AcknowledgedSequence);
+        Assert.Equal(1, envelope.ClientSequence);
+    }
+
+    [Fact]
+    public async Task TokenRefreshRejoinAcceptsNewGenerationBoundaryAndResetsClientAck()
+    {
+        var session = CreateSession();
+        var now = new DateTimeOffset(2026, 03, 25, 18, 10, 00, TimeSpan.Zero);
+        var delay = new ControlledDelay();
+        var firstSocket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-refresh-generation-1")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        var secondSocket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-refresh-generation-2")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        var negotiationClient = new ScriptedNegotiationClient(
+            CreateNegotiationResponse(session, now.AddMinutes(60)),
+            CreateNegotiationResponse(session, now.AddMinutes(120)));
+
+        await using var service = CreateService(
+            negotiationClient,
+            () => now,
+            delay.DelayAsync,
+            firstSocket,
+            secondSocket);
+
+        await service.PrepareForSessionAsync(session);
+
+        firstSocket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1)));
+        await WaitForAsync(() => service.RecentTraffic.Count == 1);
+
+        await WaitForAsync(() => delay.RequestedDelays.Count == 1);
+        delay.ReleaseNext();
+        await WaitForAsync(() => secondSocket.SentTexts.Count >= 2 && service.CurrentStatus.ConnectionId == "conn-refresh-generation-2");
+
+        secondSocket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1, generation: 2, content: "after-refresh-generation")));
+        await WaitForAsync(() => service.RecentTraffic.Any(traffic =>
+            traffic.Direction == MessageTrafficDirection.Incoming &&
+            traffic.Envelope.Generation == 2 &&
+            traffic.Envelope.Sequence == 1));
+
+        await service.SendInputAsync("after-refresh-generation");
+        await WaitForAsync(() => service.RecentTraffic.Count >= 4);
+
+        using var sendCommand = JsonDocument.Parse(secondSocket.SentTexts[^1]);
+        var envelope = sendCommand.RootElement.GetProperty("data")
+            .Deserialize<MessageEnvelope<JsonElement>>(SessionMessageSerializer.DefaultOptions);
+
+        Assert.NotNull(envelope);
+        Assert.Equal(2, envelope!.Generation);
+        Assert.Equal(1, envelope.AcknowledgedSequence);
         Assert.Equal(1, envelope.ClientSequence);
     }
 
@@ -1311,6 +1470,67 @@ public sealed class PubSubConnectionServiceTests
     }
 
     [Fact]
+    public async Task ReconnectAsyncAfterReplayGapFaultRequestsReplayFromLastAcknowledgedSequence()
+    {
+        var session = CreateSession();
+        var firstSocket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-gap-1")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        var secondSocket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-gap-2")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        await using var service = CreateService(new RecordingNegotiationClient(CreateNegotiationResponse(session)), firstSocket, secondSocket);
+        await service.PrepareForSessionAsync(session);
+
+        firstSocket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1)));
+        firstSocket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 3)));
+        await WaitForAsync(() => firstSocket.SentTexts.Count >= 2);
+
+        firstSocket.EnqueueIncoming(GroupMessage(CreateReplayResponseEnvelope(
+            session,
+            gapDetected: true,
+            availableFromSequence: 5,
+            availableToSequence: 12)));
+        await WaitForAsync(() => service.CurrentStatus.State == MessageConnectionState.Faulted);
+
+        var reconnectStatus = await service.ReconnectAsync();
+        await WaitForAsync(() => secondSocket.SentTexts.Count >= 2);
+
+        using var replayCommand = JsonDocument.Parse(secondSocket.SentTexts[1]);
+        var replayRequest = replayCommand.RootElement.GetProperty("data")
+            .Deserialize<MessageEnvelope<ReplayRequestPayload>>(SessionMessageSerializer.DefaultOptions);
+
+        Assert.NotNull(replayRequest);
+        Assert.Equal(MessageConnectionState.Connected, reconnectStatus.State);
+        Assert.Equal(ReplayRequestReason.ReconnectResume, replayRequest!.Payload.Reason);
+        Assert.Equal(SessionEnvelopeContract.InitialGeneration, replayRequest.Generation);
+        Assert.Equal(1, replayRequest.AcknowledgedSequence);
+        Assert.Equal(2, replayRequest.Payload.FromSequenceInclusive);
+    }
+
+    [Fact]
     public async Task ReceivingNewGenerationResetsClientAcknowledgementState()
     {
         var session = CreateSession();
@@ -1533,12 +1753,13 @@ public sealed class PubSubConnectionServiceTests
         SessionDescriptor session,
         string nonce,
         int timeoutSeconds = SessionHeartbeatDefaults.LivenessTimeoutSeconds,
-        int expectedIntervalSeconds = SessionHeartbeatDefaults.ExpectedIntervalSeconds) =>
+        int expectedIntervalSeconds = SessionHeartbeatDefaults.ExpectedIntervalSeconds,
+        long generation = SessionEnvelopeContract.InitialGeneration) =>
         new()
         {
             ProjectId = session.ProjectId,
             SessionId = session.SessionId,
-            Generation = SessionEnvelopeContract.InitialGeneration,
+            Generation = generation,
             MessageType = SessionMessageType.Heartbeat,
             Direction = MessageDirection.BrokerToClient,
             TimestampUtc = DateTimeOffset.UtcNow,

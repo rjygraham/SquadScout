@@ -112,6 +112,60 @@ public sealed class SessionResumeServiceTests
         Assert.Null(service.CurrentState);
     }
 
+    [Fact]
+    public async Task RestoreAsync_WithCorruptedState_DeletesStorageAndLeavesSessionCleared()
+    {
+        var storagePath = CreateStoragePath();
+        Directory.CreateDirectory(Path.GetDirectoryName(storagePath)!);
+        await File.WriteAllTextAsync(storagePath, "{ not valid json");
+
+        var activeSessionState = new ActiveSessionState();
+        var service = new SessionResumeService(storagePath, activeSessionState);
+
+        await service.RestoreAsync();
+
+        Assert.Null(service.CurrentState);
+        Assert.False(File.Exists(storagePath));
+        Assert.False(activeSessionState.GetSnapshot().HasActiveSession);
+    }
+
+    [Fact]
+    public async Task SaveAsync_WithoutActiveSession_ClearsPersistedStateInsteadOfKeepingStaleResume()
+    {
+        var storagePath = CreateStoragePath();
+        var service = new SessionResumeService(storagePath, new ActiveSessionState());
+
+        await service.SaveAsync(new ActiveSessionResumeState
+        {
+            Snapshot = new ActiveSessionSnapshot(
+                new RegisteredProject
+                {
+                    ProjectId = "squadscout",
+                    DisplayName = "SquadScout",
+                    RepositoryRoot = @"D:\GitHub\SquadScout"
+                },
+                new SessionDescriptor
+                {
+                    ProjectId = "squadscout",
+                    SessionId = "session-stale",
+                    State = SessionState.Running,
+                    CreatedAtUtc = DateTimeOffset.UtcNow
+                },
+                SessionActivationSource.Broker,
+                "Persisted session.")
+        });
+
+        Assert.True(File.Exists(storagePath));
+
+        await service.SaveAsync(new ActiveSessionResumeState
+        {
+            Snapshot = ActiveSessionSnapshot.Empty
+        });
+
+        Assert.False(File.Exists(storagePath));
+        Assert.Null(service.CurrentState);
+    }
+
     private static string CreateStoragePath() =>
         Path.Combine(AppContext.BaseDirectory, "session-resume-tests", Guid.NewGuid().ToString("N"), "active-session.json");
 

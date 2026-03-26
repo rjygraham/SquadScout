@@ -85,6 +85,14 @@ public sealed class GrainBackedProjectCatalog : IProjectCatalog
                 return;
             }
 
+            var registryGrain = _projectRegistryGrainFactory.GetGrain();
+            var registrySnapshot = await registryGrain.GetAsync().ConfigureAwait(false);
+            if (registrySnapshot.Phase1SeedImported)
+            {
+                _phase1SeedImported = true;
+                return;
+            }
+
             var phase1Projects = (await _phase1Catalog.ListAsync(cancellationToken).ConfigureAwait(false)).ToArray();
             if (phase1Projects.Length > 0)
             {
@@ -97,8 +105,7 @@ public sealed class GrainBackedProjectCatalog : IProjectCatalog
                         .ConfigureAwait(false);
                 }
 
-                await _projectRegistryGrainFactory.GetGrain()
-                    .ImportPhase1SeedAsync(projectRecords, importedAtUtc)
+                await registryGrain.ImportPhase1SeedAsync(projectRecords, importedAtUtc)
                     .ConfigureAwait(false);
             }
 

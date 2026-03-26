@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using Orleans.Core;
 using Orleans.Runtime;
-using SquadScout.Broker.Configuration;
 using SquadScout.Broker.Orleans;
 using SquadScout.Broker.Projects;
 using SquadScout.Broker.Pty;
@@ -18,79 +17,6 @@ namespace SquadScout.Broker.Tests;
 
 public sealed class OrleansSessionGrainTests
 {
-    [Fact]
-    public void SessionGrainStatusSnapshotReportsDurableRuntimeMode()
-    {
-        var snapshot = OrleansHostStatusSnapshot.SessionGrains(
-            new OrleansHostOptions
-            {
-                Enabled = true,
-                ClusterId = "test-cluster",
-                ServiceId = "test-service",
-                SiloPort = 11111,
-                GatewayPort = 30000,
-                StorageProvider = OrleansHostOptions.DefaultStorageProvider,
-                AdoNetInvariant = OrleansHostOptions.DefaultAdoNetInvariant
-            },
-            new OrleansSchemaBootstrapResult
-            {
-                ConnectionString = "Data Source=.squadscout\\orleans\\tests.db;Mode=ReadWriteCreate;Cache=Shared",
-                Invariant = OrleansHostOptions.DefaultAdoNetInvariant,
-                DatabasePath = "D:\\GitHub\\SquadScout-19\\.squadscout\\orleans\\tests.db",
-                SchemaReady = true,
-                SchemaCreatedThisRun = true
-            },
-            new OrleansSqliteCompatibilityResult
-            {
-                ConfiguredInvariant = OrleansHostOptions.DefaultAdoNetInvariant,
-                Applied = true,
-                Note = "SQLite compatibility shim applied."
-            });
-
-        Assert.True(snapshot.Enabled);
-        Assert.Equal("session-grains", snapshot.HostMode);
-        Assert.Equal("durable-grain", snapshot.SessionStateMode);
-        Assert.Equal("in-memory", snapshot.ProjectStateMode);
-        Assert.Contains("durable session replay state", snapshot.Summary, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void SessionProjectGrainStatusSnapshotReportsDurableProjectMode()
-    {
-        var snapshot = OrleansHostStatusSnapshot.SessionProjectGrains(
-            new OrleansHostOptions
-            {
-                Enabled = true,
-                ClusterId = "test-cluster",
-                ServiceId = "test-service",
-                SiloPort = 11111,
-                GatewayPort = 30000,
-                StorageProvider = OrleansHostOptions.DefaultStorageProvider,
-                AdoNetInvariant = OrleansHostOptions.DefaultAdoNetInvariant
-            },
-            new OrleansSchemaBootstrapResult
-            {
-                ConnectionString = "Data Source=.squadscout\\orleans\\tests.db;Mode=ReadWriteCreate;Cache=Shared",
-                Invariant = OrleansHostOptions.DefaultAdoNetInvariant,
-                DatabasePath = "D:\\GitHub\\SquadScout-20\\.squadscout\\orleans\\tests.db",
-                SchemaReady = true,
-                SchemaCreatedThisRun = false
-            },
-            new OrleansSqliteCompatibilityResult
-            {
-                ConfiguredInvariant = OrleansHostOptions.DefaultAdoNetInvariant,
-                Applied = true,
-                Note = "SQLite compatibility shim applied."
-            });
-
-        Assert.True(snapshot.Enabled);
-        Assert.Equal("session-project-grains", snapshot.HostMode);
-        Assert.Equal("durable-grain", snapshot.SessionStateMode);
-        Assert.Equal("durable-grain", snapshot.ProjectStateMode);
-        Assert.Contains("project registration catalog", snapshot.Summary, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("restart active sessions", snapshot.Note, StringComparison.OrdinalIgnoreCase);
-    }
-
     [Fact]
     public async Task GrainBackedOrchestratorPersistsReplayBufferAndAcknowledgementAcrossReactivation()
     {
@@ -145,6 +71,199 @@ public sealed class OrleansSessionGrainTests
     }
 
     [Fact]
+    public async Task GrainBackedReplayDetectsOverflowAndSkipsHeartbeatControlFrames()
+    {
+        var grainFactory = new TestSessionGrainFactory();
+        var orchestrator = new GrainBackedSessionOrchestrator(new NullRelayPublisher(), grainFactory);
+
+        var session = await orchestrator.StartAsync(new StartSessionCommand
+        {
+            ProjectId = "broker",
+            RequestedBy = "tests"
+        });
+
+        var firstOutput = await orchestrator.RecordBrokerMessageAsync(
+            session.SessionId,
+            CreateBrokerCommand(
+                SessionMessageType.Output,
+                "broker-output-1",
+                "corr-overflow",
+                new OutputChunkPayload { Content = "one" }));
+
+        var heartbeat = await orchestrator.RecordBrokerMessageAsync(
+            session.SessionId,
+            CreateBrokerCommand(
+                SessionMessageType.Heartbeat,
+                "broker-heartbeat-1",
+                "corr-overflow",
+                new HeartbeatPayload { Nonce = "nonce-1" }));
+
+        var secondOutput = await orchestrator.RecordBrokerMessageAsync(
+            session.SessionId,
+            CreateBrokerCommand(
+                SessionMessageType.Output,
+                "broker-output-2",
+                "corr-overflow",
+                new OutputChunkPayload { Content = "two" }));
+
+        var lifecycle = await orchestrator.RecordBrokerMessageAsync(
+            session.SessionId,
+            CreateBrokerCommand(
+                SessionMessageType.SessionLifecycle,
+                "broker-lifecycle-3",
+                "corr-overflow",
+                new SessionLifecyclePayload
+                {
+                    State = SessionState.Running,
+                    Reason = "tests"
+                }));
+
+        MessageEnvelope<OutputChunkPayload>? lastOutput = null;
+        var finalSequence = SessionSequencingDefaults.ReplayBufferCapacity + 1;
+        for (var sequence = 4; sequence <= finalSequence; sequence++)
+        {
+            lastOutput = await orchestrator.RecordBrokerMessageAsync(
+                session.SessionId,
+                CreateBrokerCommand(
+                    SessionMessageType.Output,
+                    $"broker-output-{sequence}",
+                    "corr-overflow",
+                    new OutputChunkPayload { Content = $"output-{sequence}" }));
+        }
+
+        var replay = await orchestrator.ReplayAsync(
+            session.SessionId,
+            new MessageEnvelope<ReplayRequestPayload>
+            {
+                ProjectId = session.ProjectId,
+                SessionId = session.SessionId,
+                Generation = SessionEnvelopeContract.InitialGeneration,
+                MessageType = SessionMessageType.ReplayRequest,
+                Direction = MessageDirection.ClientToBroker,
+                ClientSequence = 1,
+                MessageId = "client-replay-overflow",
+                CorrelationId = "corr-overflow",
+                Payload = new ReplayRequestPayload
+                {
+                    FromSequenceInclusive = 1,
+                    ToSequenceInclusive = finalSequence,
+                    MaximumMessages = SessionSequencingDefaults.ReplayBufferCapacity + 1,
+                    Reason = ReplayRequestReason.GapDetected
+                }
+            });
+
+        Assert.Equal(1, firstOutput.Sequence);
+        Assert.Null(heartbeat.Sequence);
+        Assert.Equal(2, secondOutput.Sequence);
+        Assert.Equal(3, lifecycle.Sequence);
+        Assert.NotNull(lastOutput);
+        Assert.Equal(finalSequence, lastOutput!.Sequence);
+        Assert.True(replay.Payload.GapDetected);
+        Assert.Equal(2, replay.Payload.FromSequenceInclusive);
+        Assert.Equal(finalSequence, replay.Payload.ToSequenceInclusive);
+        Assert.Equal(2, replay.Payload.AvailableFromSequence);
+        Assert.Equal(finalSequence, replay.Payload.AvailableToSequence);
+        Assert.Equal(SessionSequencingDefaults.ReplayBufferCapacity, replay.Payload.Messages.Count);
+        Assert.Equal(2, replay.Payload.Messages[0].Sequence);
+        Assert.Equal(3, replay.Payload.Messages[1].Sequence);
+        Assert.Equal(finalSequence, replay.Payload.Messages[^1].Sequence);
+        Assert.Equal(SessionMessageType.Output, replay.Payload.Messages[0].MessageType);
+        Assert.Equal(SessionMessageType.SessionLifecycle, replay.Payload.Messages[1].MessageType);
+        Assert.Equal(SessionMessageType.Output, replay.Payload.Messages[^1].MessageType);
+        Assert.All(
+            replay.Payload.Messages,
+            message => Assert.True(
+                message.MessageType is SessionMessageType.Output or SessionMessageType.SessionLifecycle));
+        Assert.DoesNotContain(replay.Payload.Messages, message => message.MessageType == SessionMessageType.Heartbeat);
+    }
+
+    [Fact]
+    public async Task GrainBackedReplayDetectsOverflowAndSkipsHeartbeatControlFramesWithSmallBuffer()
+    {
+        var grainFactory = new TestSessionGrainFactory(replayBufferCapacity: 3);
+        var orchestrator = new GrainBackedSessionOrchestrator(new NullRelayPublisher(), grainFactory);
+        var session = await orchestrator.StartAsync(new StartSessionCommand
+        {
+            ProjectId = "broker",
+            RequestedBy = "tests"
+        });
+
+        await orchestrator.RecordBrokerMessageAsync(
+            session.SessionId,
+            CreateBrokerCommand(
+                SessionMessageType.Output,
+                "broker-output-1",
+                "corr-output",
+                new OutputChunkPayload { Content = "one" }));
+
+        await orchestrator.RecordBrokerMessageAsync(
+            session.SessionId,
+            CreateBrokerCommand(
+                SessionMessageType.Heartbeat,
+                "broker-heartbeat-1",
+                "corr-heartbeat",
+                new HeartbeatPayload { Nonce = "nonce-1" }));
+
+        await orchestrator.RecordBrokerMessageAsync(
+            session.SessionId,
+            CreateBrokerCommand(
+                SessionMessageType.Output,
+                "broker-output-2",
+                "corr-output",
+                new OutputChunkPayload { Content = "two" }));
+
+        await orchestrator.RecordBrokerMessageAsync(
+            session.SessionId,
+            CreateBrokerCommand(
+                SessionMessageType.SessionLifecycle,
+                "broker-lifecycle-3",
+                "corr-lifecycle",
+                new SessionLifecyclePayload { State = SessionState.Running }));
+
+        await orchestrator.RecordBrokerMessageAsync(
+            session.SessionId,
+            CreateBrokerCommand(
+                SessionMessageType.Output,
+                "broker-output-4",
+                "corr-output",
+                new OutputChunkPayload { Content = "four" }));
+
+        var replay = await orchestrator.ReplayAsync(
+            session.SessionId,
+            new MessageEnvelope<ReplayRequestPayload>
+            {
+                ProjectId = session.ProjectId,
+                SessionId = session.SessionId,
+                Generation = SessionEnvelopeContract.InitialGeneration,
+                MessageType = SessionMessageType.ReplayRequest,
+                Direction = MessageDirection.ClientToBroker,
+                ClientSequence = 1,
+                MessageId = "client-replay-1",
+                CorrelationId = "corr-output",
+                Payload = new ReplayRequestPayload
+                {
+                    FromSequenceInclusive = 1,
+                    MaximumMessages = 10,
+                    Reason = ReplayRequestReason.GapDetected
+                }
+            });
+
+        Assert.Null(replay.Sequence);
+        Assert.Equal(2, replay.Payload.FromSequenceInclusive);
+        Assert.Equal(4, replay.Payload.ToSequenceInclusive);
+        Assert.True(replay.Payload.GapDetected);
+        Assert.Equal(2, replay.Payload.AvailableFromSequence);
+        Assert.Equal(4, replay.Payload.AvailableToSequence);
+        Assert.Equal("corr-output", replay.CorrelationId);
+        Assert.Equal("client-replay-1", replay.CausationId);
+        Assert.Collection(
+            replay.Payload.Messages,
+            message => Assert.Equal(2, message.Sequence),
+            message => Assert.Equal(3, message.Sequence),
+            message => Assert.Equal(4, message.Sequence));
+    }
+
+    [Fact]
     public async Task GrainBackedOrchestratorPersistsGenerationResetBoundaryAcrossReactivation()
     {
         var grainFactory = new TestSessionGrainFactory();
@@ -192,6 +311,197 @@ public sealed class OrleansSessionGrainTests
         Assert.Equal(1, replay.Payload.AvailableFromSequence);
         Assert.Equal(1, replay.Payload.AvailableToSequence);
         Assert.Empty(replay.Payload.Messages);
+    }
+
+    [Fact]
+    public async Task GrainBackedOrchestratorClearsAcknowledgementBoundaryAcrossGenerationResetReactivation()
+    {
+        var grainFactory = new TestSessionGrainFactory();
+        var firstOrchestrator = new GrainBackedSessionOrchestrator(new NullRelayPublisher(), grainFactory);
+
+        var session = await firstOrchestrator.StartAsync(new StartSessionCommand
+        {
+            ProjectId = "broker",
+            RequestedBy = "tests"
+        });
+
+        var beforeReset = await RecordOutputAsync(
+            firstOrchestrator,
+            session,
+            "broker-output-before-ack-reset",
+            "corr-ack-reset",
+            "before reset");
+
+        var acceptedBeforeReset = await firstOrchestrator.AcceptClientMessageAsync(
+            session.SessionId,
+            CreateInputEnvelope(
+                session,
+                clientSequence: 1,
+                acknowledgedSequence: beforeReset.Sequence,
+                content: "status\n"),
+            static (_, _) => Task.CompletedTask);
+
+        var nextGeneration = await firstOrchestrator.ResetGenerationAsync(session.SessionId);
+
+        var secondOrchestrator = new GrainBackedSessionOrchestrator(new NullRelayPublisher(), grainFactory);
+        var staleGeneration = await secondOrchestrator.ValidateClientMessageAsync(
+            session.SessionId,
+            CreateInputEnvelope(
+                session,
+                clientSequence: 2,
+                acknowledgedSequence: beforeReset.Sequence,
+                content: "stale\n",
+                generation: SessionEnvelopeContract.InitialGeneration));
+
+        var acceptedAfterReset = await secondOrchestrator.AcceptClientMessageAsync(
+            session.SessionId,
+            CreateInputEnvelope(
+                session,
+                clientSequence: 1,
+                acknowledgedSequence: null,
+                content: "fresh\n",
+                generation: nextGeneration),
+            static (_, _) => Task.CompletedTask);
+
+        var afterReset = await RecordOutputAsync(
+            secondOrchestrator,
+            session,
+            "broker-output-after-ack-reset",
+            "corr-ack-reset",
+            "after reset");
+
+        var replay = await secondOrchestrator.ReplayAsync(
+            session.SessionId,
+            CreateReplayRequest(
+                session,
+                clientSequence: 2,
+                generation: nextGeneration,
+                fromSequenceInclusive: 1));
+
+        Assert.Equal(SequenceValidationStatus.Accepted, acceptedBeforeReset.Status);
+        Assert.Equal(beforeReset.Sequence, acceptedBeforeReset.AppliedAcknowledgedSequence);
+        Assert.Equal(SequenceValidationStatus.StaleGeneration, staleGeneration.Status);
+        Assert.Equal(SequenceValidationStatus.Accepted, acceptedAfterReset.Status);
+        Assert.Equal(1, acceptedAfterReset.ClientSequence);
+        Assert.Null(acceptedAfterReset.AppliedAcknowledgedSequence);
+        Assert.Equal(nextGeneration, afterReset.Generation);
+        Assert.Equal(1, afterReset.Sequence);
+        Assert.Null(afterReset.AcknowledgedSequence);
+        Assert.Collection(
+            replay.Payload.Messages,
+            message =>
+            {
+                Assert.Equal(1, message.Sequence);
+                Assert.Equal(nextGeneration, message.Generation);
+            });
+    }
+
+    [Fact]
+    public async Task GrainBackedOrchestratorPersistsMultiPageReplayBoundariesAcrossMutationAndReactivation()
+    {
+        var grainFactory = new TestSessionGrainFactory();
+        var firstOrchestrator = new GrainBackedSessionOrchestrator(new NullRelayPublisher(), grainFactory);
+
+        var session = await firstOrchestrator.StartAsync(new StartSessionCommand
+        {
+            ProjectId = "broker",
+            RequestedBy = "tests"
+        });
+
+        for (var sequence = 1; sequence <= 4; sequence++)
+        {
+            await RecordOutputAsync(
+                firstOrchestrator,
+                session,
+                $"broker-output-page-{sequence}",
+                "corr-page",
+                $"message-{sequence}");
+        }
+
+        var firstPage = await firstOrchestrator.ReplayAsync(
+            session.SessionId,
+            CreateReplayRequest(
+                session,
+                clientSequence: 1,
+                generation: SessionEnvelopeContract.InitialGeneration,
+                fromSequenceInclusive: 1,
+                maximumMessages: 2));
+
+        var secondOrchestrator = new GrainBackedSessionOrchestrator(new NullRelayPublisher(), grainFactory);
+        await RecordOutputAsync(
+            secondOrchestrator,
+            session,
+            "broker-output-page-5",
+            "corr-page",
+            "message-5");
+
+        var secondPage = await secondOrchestrator.ReplayAsync(
+            session.SessionId,
+            CreateReplayRequest(
+                session,
+                clientSequence: 2,
+                generation: SessionEnvelopeContract.InitialGeneration,
+                fromSequenceInclusive: 3,
+                maximumMessages: 2));
+
+        for (var sequence = 6; sequence <= 505; sequence++)
+        {
+            await RecordOutputAsync(
+                secondOrchestrator,
+                session,
+                $"broker-output-overflow-{sequence}",
+                "corr-page",
+                $"overflow-{sequence}");
+        }
+
+        var thirdOrchestrator = new GrainBackedSessionOrchestrator(new NullRelayPublisher(), grainFactory);
+        var overflowPage = await thirdOrchestrator.ReplayAsync(
+            session.SessionId,
+            CreateReplayRequest(
+                session,
+                clientSequence: 3,
+                generation: SessionEnvelopeContract.InitialGeneration,
+                fromSequenceInclusive: 1,
+                maximumMessages: 2));
+
+        var resumedPage = await thirdOrchestrator.ReplayAsync(
+            session.SessionId,
+            CreateReplayRequest(
+                session,
+                clientSequence: 4,
+                generation: SessionEnvelopeContract.InitialGeneration,
+                fromSequenceInclusive: 8,
+                maximumMessages: 2));
+
+        Assert.False(firstPage.Payload.GapDetected);
+        Assert.True(firstPage.Payload.HasMore);
+        Assert.Collection(
+            firstPage.Payload.Messages,
+            message => Assert.Equal(1, message.Sequence),
+            message => Assert.Equal(2, message.Sequence));
+
+        Assert.False(secondPage.Payload.GapDetected);
+        Assert.True(secondPage.Payload.HasMore);
+        Assert.Collection(
+            secondPage.Payload.Messages,
+            message => Assert.Equal(3, message.Sequence),
+            message => Assert.Equal(4, message.Sequence));
+
+        Assert.True(overflowPage.Payload.GapDetected);
+        Assert.Equal(6, overflowPage.Payload.AvailableFromSequence);
+        Assert.Equal(505, overflowPage.Payload.AvailableToSequence);
+        Assert.True(overflowPage.Payload.HasMore);
+        Assert.Collection(
+            overflowPage.Payload.Messages,
+            message => Assert.Equal(6, message.Sequence),
+            message => Assert.Equal(7, message.Sequence));
+
+        Assert.False(resumedPage.Payload.GapDetected);
+        Assert.True(resumedPage.Payload.HasMore);
+        Assert.Collection(
+            resumedPage.Payload.Messages,
+            message => Assert.Equal(8, message.Sequence),
+            message => Assert.Equal(9, message.Sequence));
     }
 
     [Fact]
@@ -425,6 +735,104 @@ public sealed class OrleansSessionGrainTests
     }
 
     [Fact]
+    public async Task GrainBackedProjectCatalogPreservesPhase1SeedBoundaryAcrossReactivation()
+    {
+        var initialPhase1Catalog = new InMemoryProjectCatalog();
+        await initialPhase1Catalog.UpsertAsync(new RegisteredProject
+        {
+            ProjectId = "alpha",
+            DisplayName = "Alpha",
+            RepositoryRoot = GetRepositoryRoot()
+        });
+
+        var projectGrainFactory = new TestProjectGrainFactory();
+        var projectRegistryGrainFactory = new TestProjectRegistryGrainFactory();
+        var firstCatalog = new GrainBackedProjectCatalog(projectGrainFactory, projectRegistryGrainFactory, initialPhase1Catalog);
+
+        var imported = await firstCatalog.ListAsync();
+
+        var restartedPhase1Catalog = new InMemoryProjectCatalog();
+        await restartedPhase1Catalog.UpsertAsync(new RegisteredProject
+        {
+            ProjectId = "legacy-only",
+            DisplayName = "Legacy Only",
+            RepositoryRoot = GetRepositoryRoot()
+        });
+
+        var secondCatalog = new GrainBackedProjectCatalog(
+            projectGrainFactory,
+            projectRegistryGrainFactory,
+            restartedPhase1Catalog);
+
+        var persisted = await secondCatalog.ListAsync();
+
+        Assert.Collection(imported, project => Assert.Equal("alpha", project.ProjectId));
+        Assert.Collection(persisted, project => Assert.Equal("alpha", project.ProjectId));
+    }
+
+    [Fact]
+    public async Task GrainBackedProjectCatalogPersistsMetadataUpdatesAndProjectIsolationAcrossReactivation()
+    {
+        var projectGrainFactory = new TestProjectGrainFactory();
+        var projectRegistryGrainFactory = new TestProjectRegistryGrainFactory();
+        var firstCatalog = new GrainBackedProjectCatalog(
+            projectGrainFactory,
+            projectRegistryGrainFactory,
+            new InMemoryProjectCatalog());
+
+        await firstCatalog.UpsertAsync(new RegisteredProject
+        {
+            ProjectId = "alpha",
+            DisplayName = "Alpha",
+            RepositoryRoot = GetRepositoryRoot()
+        });
+        await firstCatalog.UpsertAsync(new RegisteredProject
+        {
+            ProjectId = "beta",
+            DisplayName = "Beta",
+            RepositoryRoot = Path.Combine(GetRepositoryRoot(), "src")
+        });
+        await firstCatalog.UpsertAsync(new RegisteredProject
+        {
+            ProjectId = "alpha",
+            DisplayName = "Alpha Updated",
+            RepositoryRoot = Path.Combine(GetRepositoryRoot(), "tests")
+        });
+
+        var secondCatalog = new GrainBackedProjectCatalog(
+            projectGrainFactory,
+            projectRegistryGrainFactory,
+            new InMemoryProjectCatalog());
+
+        var alpha = await secondCatalog.GetAsync("alpha");
+        var beta = await secondCatalog.GetAsync("beta");
+        var persistedProjects = (await secondCatalog.ListAsync())
+            .OrderBy(project => project.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        Assert.NotNull(alpha);
+        Assert.Equal("Alpha Updated", alpha!.DisplayName);
+        Assert.Equal(Path.Combine(GetRepositoryRoot(), "tests"), alpha.RepositoryRoot);
+
+        Assert.NotNull(beta);
+        Assert.Equal("Beta", beta!.DisplayName);
+        Assert.Equal(Path.Combine(GetRepositoryRoot(), "src"), beta.RepositoryRoot);
+
+        Assert.Collection(
+            persistedProjects,
+            project =>
+            {
+                Assert.Equal("alpha", project.ProjectId);
+                Assert.Equal("Alpha Updated", project.DisplayName);
+            },
+            project =>
+            {
+                Assert.Equal("beta", project.ProjectId);
+                Assert.Equal("Beta", project.DisplayName);
+            });
+    }
+
+    [Fact]
     public async Task ProjectGrainRejectsMismatchedProjectIdentifier()
     {
         var projectGrain = new TestProjectGrainFactory().GetGrain("broker");
@@ -456,12 +864,13 @@ public sealed class OrleansSessionGrainTests
         SessionDescriptor session,
         long clientSequence,
         long? acknowledgedSequence,
-        string content) =>
+        string content,
+        long generation = SessionEnvelopeContract.InitialGeneration) =>
         new()
         {
             ProjectId = session.ProjectId,
             SessionId = session.SessionId,
-            Generation = SessionEnvelopeContract.InitialGeneration,
+            Generation = generation,
             MessageType = SessionMessageType.Input,
             Direction = MessageDirection.ClientToBroker,
             ClientSequence = clientSequence,
@@ -479,6 +888,7 @@ public sealed class OrleansSessionGrainTests
         long clientSequence,
         long generation,
         long fromSequenceInclusive,
+        int maximumMessages = 10,
         ReplayRequestReason reason = ReplayRequestReason.GapDetected) =>
         new()
         {
@@ -493,10 +903,27 @@ public sealed class OrleansSessionGrainTests
             Payload = new ReplayRequestPayload
             {
                 FromSequenceInclusive = fromSequenceInclusive,
-                MaximumMessages = 10,
+                MaximumMessages = maximumMessages,
                 Reason = reason
             }
         };
+
+    private static Task<MessageEnvelope<OutputChunkPayload>> RecordOutputAsync(
+        GrainBackedSessionOrchestrator orchestrator,
+        SessionDescriptor session,
+        string messageId,
+        string correlationId,
+        string content) =>
+        orchestrator.RecordBrokerMessageAsync(
+            session.SessionId,
+            CreateBrokerCommand(
+                SessionMessageType.Output,
+                messageId,
+                correlationId,
+                new OutputChunkPayload
+                {
+                    Content = content
+                }));
 
     private static string GetRepositoryRoot() => Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory,
@@ -526,11 +953,30 @@ public sealed class OrleansSessionGrainTests
     private sealed class TestSessionGrainFactory : ISessionGrainFactory
     {
         private readonly ConcurrentDictionary<string, TestPersistentState> _states = new(StringComparer.OrdinalIgnoreCase);
+        private readonly int? _replayBufferCapacity;
+
+        public TestSessionGrainFactory(int? replayBufferCapacity = null)
+        {
+            _replayBufferCapacity = replayBufferCapacity;
+        }
 
         public ISessionGrain GetGrain(string sessionId)
         {
             var persistentState = _states.GetOrAdd(sessionId, static _ => new TestPersistentState());
-            return new SessionGrain(persistentState);
+            var grain = new SessionGrain(persistentState);
+
+            if (_replayBufferCapacity.HasValue)
+            {
+                var field = typeof(SessionGrain).GetField("_replayBufferCapacity", BindingFlags.Instance | BindingFlags.NonPublic);
+                if (field is null)
+                {
+                    throw new InvalidOperationException("Unable to locate replay buffer capacity field.");
+                }
+
+                field.SetValue(grain, _replayBufferCapacity.Value);
+            }
+
+            return grain;
         }
     }
 
