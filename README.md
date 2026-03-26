@@ -75,30 +75,24 @@ dotnet run
 
 ```http
 GET /health
-GET /alive
+GET /alive                        # Development only
 ```
 
 ### Projects
 
 ```http
-POST /projects                    # Register project
-GET /projects                     # List projects
-GET /projects/{projectId}         # Get project details
+POST /api/projects                # Register project
+GET /api/projects                 # List projects
 ```
 
 ### Sessions
 
 ```http
-POST /sessions/{projectId}/start  # Start session
-POST /sessions/{projectId}/stop   # Stop session
-POST /sessions/{projectId}/input  # Send input to session
-GET /sessions/{projectId}         # Get session status
-```
-
-### WebSocket
-
-```http
-GET /ws/sessions/{sessionId}      # Subscribe to session messages
+POST /api/sessions                # Start session
+GET /api/sessions/{sessionId}     # Get session status
+POST /api/sessions/{sessionId}/stop   # Stop session
+POST /api/sessions/{sessionId}/input  # Send input to session
+GET /api/sessions/{sessionId}/telemetry  # Get session diagnostics (Phase 1)
 ```
 
 ## Configuration
@@ -120,10 +114,10 @@ See [Broker Setup](./docs/BROKER_SETUP.md) for full configuration reference.
 
 ## Architecture
 
-- **Broker Host:** Local HTTP server exposing REST + WebSocket APIs.
+- **Broker Host:** Local HTTP server exposing REST APIs.
 - **PTY Host:** Windows ConPTY wrapper for Copilot process lifecycle.
 - **Session Orchestration:** In-memory session state and message routing.
-- **Relay Integration:** Optional Azure Web PubSub for remote client messaging.
+- **Relay Integration:** Optional Azure Web PubSub for remote client messaging (publish-only in Phase 1).
 - **Orleans (Phase 2):** Grain-based state distribution (currently disabled).
 
 ## Known Limitations (Phase 1)

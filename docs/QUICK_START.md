@@ -34,7 +34,7 @@ curl http://127.0.0.1:5071/health
 ### 2. Register a Project
 
 ```bash
-curl -X POST http://127.0.0.1:5071/projects \
+curl -X POST http://127.0.0.1:5071/api/projects \
   -H "Content-Type: application/json" \
   -d '{
     "projectId": "my-project",
@@ -46,7 +46,7 @@ curl -X POST http://127.0.0.1:5071/projects \
 ### 3. List Projects
 
 ```bash
-curl http://127.0.0.1:5071/projects
+curl http://127.0.0.1:5071/api/projects
 ```
 
 ## Troubleshooting Quick Fixes

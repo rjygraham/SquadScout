@@ -102,7 +102,7 @@ dotnet run --Broker:ListenUrl="http://0.0.0.0:5071"
 | `InitialColumns` | int | 120 | PTY initial width (characters). Affects line wrapping. |
 | `OutputBufferSize` | int | 1024 | Maximum characters buffered per PTY read. Increase if commands produce large output. |
 | `MaxInputCharactersPerWrite` | int | 4096 | Maximum input characters allowed per client command. Prevents buffer overflow; reject commands exceeding this. |
-| `WorkingDirectory` | string | `""` (current) | Directory in which Copilot process spawns. Empty = inherit from broker. |
+| `WorkingDirectory` | string | `""` (current) | Directory in which Copilot process spawns. Empty = resolved to repository root of the registered project at session start. |
 | `BaseArguments` | string[] | `[]` | Arguments passed to `copilot` at spawn (e.g., `["--config", "path/to/config"]`). |
 | `Environment` | object | `{}` | Environment variables merged into Copilot process. E.g., `{"COPILOT_LOG": "debug"}`. |
 
@@ -155,8 +155,8 @@ dotnet run \
 
 **Without Web PubSub:**
 - Broker runs in **standalone mode**.
-- Session messages are buffered **in-memory** only.
-- No remote routing to other clients.
+- Session messages are buffered **in-memory** only (Phase 1 telemetry buffer).
+- No publish to remote clients (NullRelayPublisher used).
 - Suitable for local testing and debugging.
 
 ### Orleans (Phase 2 — Currently Disabled)
@@ -177,35 +177,45 @@ Orleans-based session grain distribution is not yet implemented. Leave `Enabled:
 
 ```http
 GET /health
-GET /alive
+GET /alive  # Development environment only
 ```
 
 Returns `200 OK` if broker is running. Used by Aspire and load balancers.
 
-### Session APIs
-
-- **Start Session:** `POST /sessions/{projectId}/start`
-- **Stop Session:** `POST /sessions/{projectId}/stop`
-- **Send Input:** `POST /sessions/{projectId}/input`
-- **Get Session Status:** `GET /sessions/{projectId}`
-
-See `/src/SquadScout.Broker/Sessions/SessionController.cs` for full details.
-
 ### Project Management
 
-- **Register Project:** `POST /projects`
-- **List Projects:** `GET /projects`
-- **Get Project:** `GET /projects/{projectId}`
+- **Register Project:** `POST /api/projects`
+- **List Projects:** `GET /api/projects`
 
-See `/src/SquadScout.Broker/Projects/ProjectController.cs` for full details.
+**Current behavior:** No GET by projectId endpoint exists. Projects are retrieved from the list endpoint.
 
-### WebSocket Upgrade
+See `src/SquadScout.Broker/Program.cs` for endpoint definitions.
 
-```http
-GET /ws/sessions/{sessionId}
-```
+### Session APIs
 
-Upgrades connection to WebSocket for bidirectional session message streaming. Used by connected clients.
+- **Start Session:** `POST /api/sessions`
+  - Request body: `StartSessionCommand` with `ProjectId` and optional configuration
+  - Returns: `202 Accepted` with session details
+  
+- **Get Session Status:** `GET /api/sessions/{sessionId}`
+  - Returns: Session state and metadata
+  
+- **Stop Session:** `POST /api/sessions/{sessionId}/stop`
+  - Request body: `StopSessionCommand` with `SessionId`
+  - Returns: Final session state
+  
+- **Send Input:** `POST /api/sessions/{sessionId}/input`
+  - Request body: `MessageEnvelope<InputChunkPayload>` with sequence metadata
+  - Returns: Sequence validation result (Accepted/Duplicate/GapDetected/Conflict)
+  
+- **Get Session Telemetry:** `GET /api/sessions/{sessionId}/telemetry`
+  - Returns: Diagnostic snapshot including sequence state and message buffer (Phase 1)
+
+See `src/SquadScout.Broker/Program.cs` for endpoint implementations.
+
+### WebSocket Support (Phase 2)
+
+**Phase 1 Status:** No WebSocket endpoints are implemented. Session output routing currently uses Azure Web PubSub publish for remote clients. Local clients poll session state or subscribe via Web PubSub client connections. Direct broker WebSocket support is deferred to Phase 2.
 
 ## Project Registration
 
@@ -218,7 +228,7 @@ Projects are registered via REST API. Each project must have:
 **Example:**
 
 ```bash
-curl -X POST http://127.0.0.1:5071/projects \
+curl -X POST http://127.0.0.1:5071/api/projects \
   -H "Content-Type: application/json" \
   -d '{
     "projectId": "squadscout-repo",
@@ -261,12 +271,12 @@ info: SquadScout.Broker[0]
 curl http://127.0.0.1:5071/health
 
 # Register a project
-curl -X POST http://127.0.0.1:5071/projects \
+curl -X POST http://127.0.0.1:5071/api/projects \
   -H "Content-Type: application/json" \
   -d '{"projectId": "test", "displayName": "Test Project", "workingDirectory": "."}'
 
 # List projects
-curl http://127.0.0.1:5071/projects
+curl http://127.0.0.1:5071/api/projects
 ```
 
 ### 4. Run Full Stack (Aspire)
