@@ -704,6 +704,129 @@ public sealed class PubSubConnectionServiceTests
         Assert.Equal(1, envelope.AcknowledgedSequence);
     }
 
+    [Fact]
+    public async Task ReceivingLowerGenerationEnvelopeFaultsWithoutRollingBackGeneration()
+    {
+        var session = CreateSession();
+        var firstSocket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-stale-output-1")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        var secondSocket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-stale-output-2")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        await using var service = CreateService(new RecordingNegotiationClient(CreateNegotiationResponse(session)), firstSocket, secondSocket);
+        await service.PrepareForSessionAsync(session);
+
+        firstSocket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1)));
+        firstSocket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 2)));
+        firstSocket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1, generation: 2)));
+        await WaitForAsync(() => service.RecentTraffic.Count == 3);
+
+        firstSocket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 99, generation: 1, content: "stale-output")));
+        await WaitForAsync(() => service.CurrentStatus.State == MessageConnectionState.Faulted && service.RecentTraffic.Count == 4);
+
+        Assert.NotNull(service.CurrentStatus.FailureReason);
+        Assert.Contains("stale generation 1", service.CurrentStatus.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("already on generation 2", service.CurrentStatus.FailureReason!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "generation 1 is older than active generation 2",
+            service.RecentTraffic[^1].Summary,
+            StringComparison.OrdinalIgnoreCase);
+
+        firstSocket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 2, generation: 2, content: "should-not-apply")));
+        await Task.Delay(100);
+        Assert.Equal(4, service.RecentTraffic.Count);
+
+        var reconnectStatus = await service.ReconnectAsync();
+        await WaitForAsync(() => secondSocket.SentTexts.Count >= 2);
+
+        Assert.Equal(MessageConnectionState.Connected, reconnectStatus.State);
+
+        using var replayCommand = JsonDocument.Parse(secondSocket.SentTexts[1]);
+        var replayRequest = replayCommand.RootElement.GetProperty("data")
+            .Deserialize<MessageEnvelope<ReplayRequestPayload>>(SessionMessageSerializer.DefaultOptions);
+
+        Assert.NotNull(replayRequest);
+        Assert.Equal(ReplayRequestReason.ReconnectResume, replayRequest!.Payload.Reason);
+        Assert.Equal(2, replayRequest.Generation);
+        Assert.Equal(1, replayRequest.AcknowledgedSequence);
+    }
+
+    [Fact]
+    public async Task ReplayResponseFromLowerGenerationIsRejectedBeforeApplyingReplayMessages()
+    {
+        var session = CreateSession();
+        var socket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-stale-replay")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        await using var service = CreateService(new RecordingNegotiationClient(CreateNegotiationResponse(session)), socket);
+        await service.PrepareForSessionAsync(session);
+
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1)));
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 2)));
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1, generation: 2)));
+        await WaitForAsync(() => service.RecentTraffic.Count == 3);
+
+        socket.EnqueueIncoming(GroupMessage(CreateReplayResponseEnvelope(
+            session,
+            generation: 1,
+            messages:
+            [
+                ToJsonEnvelope(CreateBrokerEnvelope(session, sequence: 3, generation: 1, content: "stale-replay"))
+            ])));
+        await WaitForAsync(() => service.CurrentStatus.State == MessageConnectionState.Faulted && service.RecentTraffic.Count == 4);
+
+        var replayResponse = Assert.Single(
+            service.RecentTraffic,
+            traffic => traffic.Envelope.MessageType == SessionMessageType.ReplayResponse);
+
+        Assert.NotNull(service.CurrentStatus.FailureReason);
+        Assert.Contains("Rejected incoming ReplayResponse envelope", replayResponse.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("stale generation 1", service.CurrentStatus.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("already on generation 2", service.CurrentStatus.FailureReason!, StringComparison.OrdinalIgnoreCase);
+
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 2, generation: 2, content: "should-not-apply")));
+        await Task.Delay(100);
+        Assert.Equal(4, service.RecentTraffic.Count);
+
+        Assert.DoesNotContain(
+            service.RecentTraffic,
+            traffic => traffic.Summary.Contains("Applied replayed", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static SessionDescriptor CreateSession() =>
         new()
         {

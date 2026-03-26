@@ -417,8 +417,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 return true;
 
             case "message":
-                await ProcessGroupMessageAsync(root, cancellationToken).ConfigureAwait(false);
-                return true;
+                return await ProcessGroupMessageAsync(root, cancellationToken).ConfigureAwait(false);
 
             default:
                 PublishReceiveFault($"The live session stream returned unsupported message type '{type}'.");
@@ -471,23 +470,27 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         }
     }
 
-    private async Task ProcessGroupMessageAsync(JsonElement root, CancellationToken cancellationToken)
+    private async Task<bool> ProcessGroupMessageAsync(JsonElement root, CancellationToken cancellationToken)
     {
         if (!root.TryGetProperty("dataType", out var dataTypeElement) ||
             !string.Equals(dataTypeElement.GetString(), "json", StringComparison.OrdinalIgnoreCase))
         {
             PublishReceiveFault("The live session stream returned a non-JSON group message, which the mobile transport cannot process.");
-            return;
+            return false;
         }
 
         var data = root.GetProperty("data").Clone();
         var envelope = data.Deserialize<MessageEnvelope<JsonElement>>(SessionMessageSerializer.DefaultOptions)
             ?? throw new InvalidOperationException("Azure Web PubSub delivered a malformed session envelope.");
 
+        if (TryRejectStaleBrokerEnvelope(envelope, $"incoming {envelope.MessageType} envelope"))
+        {
+            return false;
+        }
+
         if (envelope.MessageType == SessionMessageType.ReplayResponse)
         {
-            await ApplyReplayResponseAsync(envelope, cancellationToken).ConfigureAwait(false);
-            return;
+            return await ApplyReplayResponseAsync(envelope, cancellationToken).ConfigureAwait(false);
         }
 
         var gapJustDetected = TrackBrokerSequence(envelope);
@@ -511,9 +514,11 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
 
             QueueReplayRequest(ReplayRequestReason.GapDetected, cancellationToken);
         }
+
+        return true;
     }
 
-    private async Task ApplyReplayResponseAsync(
+    private async Task<bool> ApplyReplayResponseAsync(
         MessageEnvelope<JsonElement> envelope,
         CancellationToken cancellationToken)
     {
@@ -525,6 +530,16 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         lock (_stateSync)
         {
             _replayRequestPending = false;
+        }
+
+        if (payload.Generation != envelope.Generation)
+        {
+            PublishInvalidReplayGenerationBoundary(
+                envelope,
+                payload.Generation,
+                envelope.Generation,
+                "replay payload");
+            return false;
         }
 
         AppendTraffic(
@@ -544,6 +559,16 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         foreach (var replayedEnvelope in payload.Messages)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (replayedEnvelope.Generation != envelope.Generation)
+            {
+                PublishInvalidReplayGenerationBoundary(
+                    replayedEnvelope,
+                    replayedEnvelope.Generation,
+                    envelope.Generation,
+                    $"replayed {replayedEnvelope.MessageType} envelope");
+                return false;
+            }
+
             TrackBrokerSequence(replayedEnvelope);
             AppendTraffic(
                 new MessageEnvelopeTraffic
@@ -563,6 +588,8 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                 PublishStatus(restoredStatus);
             }
         }
+
+        return true;
     }
 
     private bool TrackBrokerSequence(MessageEnvelope<JsonElement> envelope)
@@ -1064,6 +1091,52 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         TrafficObserved?.Invoke(this, traffic);
     }
 
+    private bool TryRejectStaleBrokerEnvelope(MessageEnvelope<JsonElement> envelope, string sourceDescription)
+    {
+        long currentGeneration;
+        lock (_stateSync)
+        {
+            currentGeneration = _currentGeneration;
+        }
+
+        if (envelope.Generation >= currentGeneration)
+        {
+            return false;
+        }
+
+        AppendTraffic(
+            new MessageEnvelopeTraffic
+            {
+                Direction = MessageTrafficDirection.Incoming,
+                Envelope = ToJsonEnvelope(envelope),
+                ObservedAtUtc = _utcNow(),
+                Summary =
+                    $"Rejected {sourceDescription} for session '{envelope.SessionId}' because generation {envelope.Generation} is older than active generation {currentGeneration}."
+            });
+
+        PublishStatus(CreateStaleGenerationWarningStatus(envelope.SessionId, sourceDescription, envelope.Generation, currentGeneration));
+        return true;
+    }
+
+    private void PublishInvalidReplayGenerationBoundary(
+        MessageEnvelope<JsonElement> envelope,
+        long actualGeneration,
+        long expectedGeneration,
+        string sourceDescription)
+    {
+        AppendTraffic(
+            new MessageEnvelopeTraffic
+            {
+                Direction = MessageTrafficDirection.Incoming,
+                Envelope = ToJsonEnvelope(envelope),
+                ObservedAtUtc = _utcNow(),
+                Summary =
+                    $"Rejected {sourceDescription} for session '{envelope.SessionId}' because generation {actualGeneration} did not match replay generation {expectedGeneration}."
+            });
+
+        PublishStatus(CreateInvalidReplayGenerationStatus(envelope.SessionId, sourceDescription, actualGeneration, expectedGeneration));
+    }
+
     private MessageConnectionStatus CreateReadyStatus(SessionDescriptor session) =>
         new()
         {
@@ -1150,6 +1223,57 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         {
             State = MessageConnectionState.Faulted,
             Summary = $"Live messaging replay warning for session '{sessionId}'. {failureReason}",
+            FailureReason = failureReason
+        };
+    }
+
+    private MessageConnectionStatus CreateStaleGenerationWarningStatus(
+        string sessionId,
+        string sourceDescription,
+        long rejectedGeneration,
+        long currentGeneration)
+    {
+        var failureReason =
+            $"The mobile client rejected {sourceDescription} from stale generation {rejectedGeneration} because session '{sessionId}' is already on generation {currentGeneration}. Reconnect or restart the session before trusting transcript continuity.";
+
+        return CreateGenerationContinuityWarningStatus(
+            sessionId,
+            $"Live messaging rejected stale generation {rejectedGeneration} traffic for session '{sessionId}'. {failureReason}",
+            failureReason);
+    }
+
+    private MessageConnectionStatus CreateInvalidReplayGenerationStatus(
+        string sessionId,
+        string sourceDescription,
+        long actualGeneration,
+        long expectedGeneration)
+    {
+        var failureReason =
+            $"The {sourceDescription} for session '{sessionId}' reported generation {actualGeneration}, but replay recovery expected generation {expectedGeneration}. Reconnect or restart the session before trusting transcript continuity.";
+
+        return CreateGenerationContinuityWarningStatus(
+            sessionId,
+            $"Live messaging rejected replay recovery data for session '{sessionId}'. {failureReason}",
+            failureReason);
+    }
+
+    private MessageConnectionStatus CreateGenerationContinuityWarningStatus(
+        string sessionId,
+        string summary,
+        string failureReason)
+    {
+        var connectedStatus = TryCreateConnectedStatus();
+        if (connectedStatus is null)
+        {
+            var session = GetActiveSession()
+                ?? throw new InvalidOperationException($"Active session '{sessionId}' is required before generation continuity warnings can be published.");
+            return CreateFaultedStatus(session, CurrentStatus.ReconnectAttempt, failureReason);
+        }
+
+        return connectedStatus with
+        {
+            State = MessageConnectionState.Faulted,
+            Summary = summary,
             FailureReason = failureReason
         };
     }
