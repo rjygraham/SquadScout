@@ -11,6 +11,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
 {
     private readonly IPersistentState<SessionGrainState> _persistentState;
     private readonly int _replayBufferCapacity;
+    private readonly SemaphoreSlim _loadGate = new(1, 1);
     private SessionRuntimeState? _runtime;
     private bool _stateLoaded;
 
@@ -191,13 +192,26 @@ public sealed class SessionGrain : Grain, ISessionGrain
             return;
         }
 
-        await _persistentState.ReadStateAsync().ConfigureAwait(true);
-        _runtime = _persistentState.RecordExists
-            ? _persistentState.State.ToRuntimeSnapshot() is { } snapshot
-                ? new SessionRuntimeState(snapshot, _replayBufferCapacity)
-                : null
-            : null;
-        _stateLoaded = true;
+        await _loadGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            if (_stateLoaded)
+            {
+                return;
+            }
+
+            await _persistentState.ReadStateAsync().ConfigureAwait(true);
+            _runtime = _persistentState.RecordExists
+                ? _persistentState.State.ToRuntimeSnapshot() is { } snapshot
+                    ? new SessionRuntimeState(snapshot, _replayBufferCapacity)
+                    : null
+                : null;
+            _stateLoaded = true;
+        }
+        finally
+        {
+            _loadGate.Release();
+        }
     }
 
     private async Task<SessionValidationRecord> ValidateCoreAsync(SessionEnvelopeRecord envelope)

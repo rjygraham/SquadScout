@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using SquadScout.Broker.Orleans;
 using SquadScout.Broker.Relay;
@@ -69,7 +70,18 @@ public sealed class GrainBackedSessionOrchestrator : ISessionOrchestrator
             .ConfigureAwait(false);
 
         var envelope = record.ToEnvelope<TPayload>();
-        await _relayPublisher.PublishEnvelopeAsync(envelope, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _relayPublisher.PublishEnvelopeAsync(envelope, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (IsStoppedLifecycleEnvelope(envelope))
+            {
+                RemoveClientMessageGate(sessionId);
+            }
+        }
+
         return envelope;
     }
 
@@ -105,6 +117,7 @@ public sealed class GrainBackedSessionOrchestrator : ISessionOrchestrator
                 return validation;
             }
 
+            ExceptionDispatchInfo? dispatchFailure = null;
             try
             {
                 await onAcceptedAsync(envelope, cancellationToken).ConfigureAwait(false);
@@ -116,10 +129,15 @@ public sealed class GrainBackedSessionOrchestrator : ISessionOrchestrator
                         validation.ToRecord(),
                         ex.Message)
                     .ConfigureAwait(false);
-                throw;
+                dispatchFailure = ExceptionDispatchInfo.Capture(ex);
+            }
+            finally
+            {
+                await grain.CompleteClientMessageAsync(validation.ToRecord()).ConfigureAwait(false);
             }
 
-            await grain.CompleteClientMessageAsync(validation.ToRecord()).ConfigureAwait(false);
+            dispatchFailure?.Throw();
+
             return validation;
         }
         finally
@@ -195,6 +213,19 @@ public sealed class GrainBackedSessionOrchestrator : ISessionOrchestrator
 
         return _grainFactory.GetGrain(sessionId);
     }
+
+    private void RemoveClientMessageGate(string sessionId)
+    {
+        if (_clientMessageGates.TryRemove(sessionId, out var gate))
+        {
+            gate.Dispose();
+        }
+    }
+
+    private static bool IsStoppedLifecycleEnvelope<TPayload>(MessageEnvelope<TPayload> envelope) =>
+        envelope.MessageType == SessionMessageType.SessionLifecycle
+        && envelope.Payload is SessionLifecyclePayload lifecycle
+        && lifecycle.State == SessionState.Stopped;
 
     private SemaphoreSlim GetClientMessageGate(string sessionId) =>
         _clientMessageGates.GetOrAdd(sessionId, static _ => new SemaphoreSlim(1, 1));

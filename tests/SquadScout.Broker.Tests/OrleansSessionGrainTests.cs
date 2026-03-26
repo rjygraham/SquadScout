@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 using Orleans.Core;
 using Orleans.Runtime;
 using SquadScout.Broker.Configuration;
@@ -10,6 +11,7 @@ using SquadScout.Broker.Sessions;
 using SquadScout.Broker.Tests.TestDoubles;
 using SquadScout.Contracts.Messages;
 using SquadScout.Contracts.Projects;
+using SquadScout.Contracts.Realtime;
 using SquadScout.Contracts.Sessions;
 
 namespace SquadScout.Broker.Tests;
@@ -155,6 +157,85 @@ public sealed class OrleansSessionGrainTests
     }
 
     [Fact]
+    public async Task GrainBackedOrchestratorCompletesValidationAfterForwardFailure()
+    {
+        var orchestrator = new GrainBackedSessionOrchestrator(new NullRelayPublisher(), new TestSessionGrainFactory());
+        var session = await orchestrator.StartAsync(new StartSessionCommand
+        {
+            ProjectId = "broker",
+            RequestedBy = "tests"
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => orchestrator.AcceptClientMessageAsync(
+            session.SessionId,
+            CreateInputEnvelope(session, clientSequence: 1, acknowledgedSequence: null, content: "status\n"),
+            static (_, _) => throw new InvalidOperationException("forward failed")));
+
+        var duplicate = await orchestrator.ValidateClientMessageAsync(
+            session.SessionId,
+            CreateInputEnvelope(session, clientSequence: 1, acknowledgedSequence: null, content: "status\n"));
+
+        var accepted = await orchestrator.ValidateClientMessageAsync(
+            session.SessionId,
+            CreateInputEnvelope(session, clientSequence: 2, acknowledgedSequence: null, content: "retry\n"));
+
+        Assert.Equal(SequenceValidationStatus.Duplicate, duplicate.Status);
+        Assert.Equal(1, duplicate.LastAcceptedClientSequence);
+        Assert.Equal(SequenceValidationStatus.Accepted, accepted.Status);
+        Assert.Equal(2, accepted.ClientSequence);
+        Assert.Equal(1, accepted.LastAcceptedClientSequence);
+    }
+
+    [Fact]
+    public async Task GrainBackedOrchestratorRemovesClientGateWhenSessionStops()
+    {
+        var relayPublisher = new RecordingRelayPublisher();
+        var orchestrator = new GrainBackedSessionOrchestrator(relayPublisher, new TestSessionGrainFactory());
+        var session = await orchestrator.StartAsync(new StartSessionCommand
+        {
+            ProjectId = "broker",
+            RequestedBy = "tests"
+        });
+
+        await orchestrator.ValidateClientMessageAsync(
+            session.SessionId,
+            CreateInputEnvelope(session, clientSequence: 1, acknowledgedSequence: null, content: "status\n"));
+
+        Assert.Equal(1, GetClientMessageGateCount(orchestrator));
+
+        await orchestrator.RecordBrokerMessageAsync(
+            session.SessionId,
+            CreateBrokerCommand(
+                SessionMessageType.SessionLifecycle,
+                "relay-stopped",
+                "corr-stopped",
+                new SessionLifecyclePayload
+                {
+                    State = SessionState.Stopped,
+                    Reason = "tests"
+                }));
+
+        Assert.Equal(0, GetClientMessageGateCount(orchestrator));
+        Assert.Contains(
+            relayPublisher.LeftSessionGroups,
+            groupName => string.Equals(groupName, SessionGroupName.Create(session.ProjectId, session.SessionId), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SessionGrainConcurrentLoadReadsPersistentStateOnce()
+    {
+        var persistentState = new TestPersistentState
+        {
+            ReadDelay = TimeSpan.FromMilliseconds(50)
+        };
+        var grain = new SessionGrain(persistentState);
+
+        await Task.WhenAll(grain.GetAsync(), grain.GetAsync());
+
+        Assert.Equal(1, persistentState.ReadStateCallCount);
+    }
+
+    [Fact]
     public async Task RelayPipelineRemainsCompatibleWithGrainBackedSessionState()
     {
         var projectCatalog = new InMemoryProjectCatalog();
@@ -278,6 +359,15 @@ public sealed class OrleansSessionGrainTests
         "..",
         ".."));
 
+    private static int GetClientMessageGateCount(GrainBackedSessionOrchestrator orchestrator)
+    {
+        var field = typeof(GrainBackedSessionOrchestrator).GetField("_clientMessageGates", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Unable to inspect client message gates.");
+        var gates = field.GetValue(orchestrator) as ConcurrentDictionary<string, SemaphoreSlim>
+            ?? throw new InvalidOperationException("Client message gate store had an unexpected shape.");
+        return gates.Count;
+    }
+
     private sealed class TestSessionGrainFactory : ISessionGrainFactory
     {
         private readonly ConcurrentDictionary<string, TestPersistentState> _states = new(StringComparer.OrdinalIgnoreCase);
@@ -294,6 +384,11 @@ public sealed class OrleansSessionGrainTests
         private readonly object _syncRoot = new();
         private SessionGrainState _storedState = new();
         private bool _recordExists;
+        private int _readStateCallCount;
+
+        public int ReadStateCallCount => _readStateCallCount;
+
+        public TimeSpan ReadDelay { get; init; }
 
         public string Etag { get; set; } = string.Empty;
 
@@ -328,15 +423,19 @@ public sealed class OrleansSessionGrainTests
 
         public Task ReadStateAsync() => ReadStateAsync(CancellationToken.None);
 
-        public Task ReadStateAsync(CancellationToken cancellationToken)
+        public async Task ReadStateAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref _readStateCallCount);
+            if (ReadDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(ReadDelay, cancellationToken);
+            }
+
             lock (_syncRoot)
             {
                 State = Clone(_storedState);
             }
-
-            return Task.CompletedTask;
         }
 
         public Task WriteStateAsync() => WriteStateAsync(CancellationToken.None);
