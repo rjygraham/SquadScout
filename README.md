@@ -122,6 +122,20 @@ See [Broker Setup](./docs/BROKER_SETUP.md) for full configuration reference.
 - **Relay Integration:** Azure Web PubSub is the mobile transport. Mobile project selection, session lifecycle, live input, replay recovery, and broker output all flow over Web PubSub. The Azure Function only authenticates the client and mints the Web PubSub token.
 - **Orleans (Phase 2):** Grain-based state distribution (currently disabled).
 
+## Phase 2 Gate (Issue #24)
+
+Pass criteria (fail on any miss):
+- **Grain-backed replay durability:** `OrleansSessionGrainTests` (persistence, generation reset, overflow/heartbeat parity).
+- **Replay buffer semantics:** `InMemorySessionOrchestratorReplayTests` (overflow + gap detection, reset boundary).
+- **Broker datapath baseline:** `BrokerPhase1DatapathGateTests`.
+- **App reconnect + resume:** `PubSubConnectionServiceTests` and `SessionResumeServiceTests` (replay recovery, heartbeat timeout, token refresh).
+
+Run:
+```bash
+dotnet build .\SquadScout.slnx -nologo
+dotnet test .\SquadScout.slnx -nologo --no-build
+```
+
 ## Known Limitations (Phase 1)
 
 - **No Persistent Registry:** Projects lost on broker restart.

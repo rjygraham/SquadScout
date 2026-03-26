@@ -35,6 +35,7 @@
 - **Client transport test pattern:** In `tests\SquadScout.App.Tests\PubSubConnectionServiceTests.cs`, the safest way to prove receive-loop state is to inject broker frames through `FakeWebPubSubSocket`, then inspect the next outbound client envelope to confirm generation and cumulative ack behavior after gaps or generation resets.
 - **Gate posture:** Switch should not approve the Phase 1 datapath without explicit failure-mode coverage on the MAUI receive path and concrete diagnostics handoffs for broker/function/client boundaries.
 - **Issue #54 replay dedupe pattern:** Client-side broker dedupe is safest when `MessagingConnectionService` tracks both observed sequences (for cumulative ack recovery) and applied sequences (for transcript/traffic suppression); replay responses themselves need `MessageId` dedupe because they carry no broker `Sequence`.
+- **Phase 2 gate evidence:** Grain-backed overflow/heartbeat parity is verified in `OrleansSessionGrainTests.GrainBackedReplayDetectsOverflowAndSkipsHeartbeatControlFrames`, with gate pass/fail criteria documented in README.
 
 
 ### Workstream Decomposition (2026-03-24)
