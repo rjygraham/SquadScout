@@ -33,7 +33,7 @@ public sealed class SessionRelayPipelineTests
         var startRequest = Assert.Single(harness.PtyHost.StartRequests);
         Assert.Equal(session.SessionId, startRequest.SessionId);
         Assert.Equal(session.ProjectId, startRequest.ProjectId);
-        Assert.Equal(@"D:\GitHub\SquadScout-6", startRequest.WorkingDirectory);
+        Assert.Equal(GetRepositoryRoot(), startRequest.WorkingDirectory);
         Assert.Equal(["--project", "broker"], startRequest.Arguments);
 
         var validation = await relay.RelayInputAsync(session.SessionId, CreateInputEnvelope(session, clientSequence: 1, "status --json\n"));
@@ -166,7 +166,7 @@ public sealed class SessionRelayPipelineTests
         {
             ProjectId = "broker",
             DisplayName = "Broker",
-            RepositoryRoot = @"D:\GitHub\SquadScout-13"
+            RepositoryRoot = GetRepositoryRoot()
         });
 
         var relayPublisher = new RecordingRelayPublisher();
@@ -232,7 +232,7 @@ public sealed class SessionRelayPipelineTests
         {
             ProjectId = "broker",
             DisplayName = "Broker",
-            RepositoryRoot = @"D:\GitHub\SquadScout-13"
+            RepositoryRoot = GetRepositoryRoot()
         });
 
         var relayPublisher = new RecordingRelayPublisher();
@@ -478,7 +478,7 @@ public sealed class SessionRelayPipelineTests
         {
             ProjectId = "broker",
             DisplayName = "Broker",
-            RepositoryRoot = @"D:\GitHub\SquadScout-6"
+            RepositoryRoot = GetRepositoryRoot()
         });
 
         var relayPublisher = new RecordingRelayPublisher();
@@ -494,6 +494,13 @@ public sealed class SessionRelayPipelineTests
         var orchestrator = new InMemorySessionOrchestrator(relayPublisher, new SessionSequenceValidator(), replayBufferCapacity: 8);
         var ptyHost = new MockPtyHost();
         return Task.FromResult(new RelayHarness(catalog, relayPublisher, orchestrator, ptyHost, new RecordingSessionGroupResolver()));
+    }
+
+    private static string GetRepositoryRoot()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        Directory.CreateDirectory(root);
+        return root;
     }
 
     private static MessageEnvelope<InputChunkPayload> CreateInputEnvelope(
