@@ -273,6 +273,193 @@ public sealed class PubSubConnectionServiceTests
     }
 
     [Fact]
+    public async Task BrokerHeartbeatSendsNonceAcknowledgementUsingCurrentBrokerAck()
+    {
+        var session = CreateSession();
+        var socket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-heartbeat")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        await using var service = CreateService(new RecordingNegotiationClient(CreateNegotiationResponse(session)), socket);
+        await service.PrepareForSessionAsync(session);
+
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1)));
+        await WaitForAsync(() => service.RecentTraffic.Count == 1);
+
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerHeartbeatEnvelope(session, nonce: "nonce-123")));
+        await WaitForAsync(() => socket.SentTexts.Count >= 2);
+
+        using var heartbeatCommand = JsonDocument.Parse(socket.SentTexts[1]);
+        Assert.Equal(SessionUpstreamEventNames.Heartbeat, heartbeatCommand.RootElement.GetProperty("event").GetString());
+        var envelope = heartbeatCommand.RootElement.GetProperty("data")
+            .Deserialize<MessageEnvelope<HeartbeatPayload>>(SessionMessageSerializer.DefaultOptions);
+
+        Assert.NotNull(envelope);
+        Assert.Equal(SessionMessageType.Heartbeat, envelope!.MessageType);
+        Assert.Equal(MessageDirection.ClientToBroker, envelope.Direction);
+        Assert.Equal(1, envelope.ClientSequence);
+        Assert.Equal(1, envelope.AcknowledgedSequence);
+        Assert.Equal("nonce-123", envelope.Payload.AcknowledgedNonce);
+    }
+
+    [Fact]
+    public async Task BrokerHeartbeatTimeoutClosesTransportAndFaultsStatus()
+    {
+        var session = CreateSession();
+        var clock = new MutableClock(new DateTimeOffset(2026, 03, 26, 10, 00, 00, TimeSpan.Zero));
+        var delay = new ControlledDelay();
+        var socket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-heartbeat-timeout")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        await using var service = CreateService(
+            new RecordingNegotiationClient(CreateNegotiationResponse(session, refreshAtUtc: DateTimeOffset.MinValue)),
+            clock.GetUtcNow,
+            delay.DelayAsync,
+            socket);
+        await service.PrepareForSessionAsync(session);
+
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerHeartbeatEnvelope(session, nonce: "nonce-timeout", timeoutSeconds: 3)));
+        await WaitForAsync(() => delay.RequestedDelays.Count == 1 && socket.SentTexts.Count >= 2);
+
+        clock.Advance(TimeSpan.FromSeconds(4));
+        delay.ReleaseNext();
+
+        await WaitForAsync(() => service.CurrentStatus.State == MessageConnectionState.Faulted);
+
+        Assert.Equal(WebSocketState.Closed, socket.State);
+        Assert.Contains("heartbeat timed out", service.CurrentStatus.FailureReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task NewHeartbeatExtendsDeadlineWithoutTriggeringStaleTimeout()
+    {
+        var session = CreateSession();
+        var clock = new MutableClock(new DateTimeOffset(2026, 03, 26, 10, 00, 00, TimeSpan.Zero));
+        var delay = new ControlledDelay();
+        var socket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-heartbeat-extend")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        await using var service = CreateService(
+            new RecordingNegotiationClient(CreateNegotiationResponse(session, refreshAtUtc: DateTimeOffset.MinValue)),
+            clock.GetUtcNow,
+            delay.DelayAsync,
+            socket);
+        await service.PrepareForSessionAsync(session);
+
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerHeartbeatEnvelope(session, nonce: "nonce-initial", timeoutSeconds: 3)));
+        await WaitForAsync(() => delay.RequestedDelays.Count == 1 && socket.SentTexts.Count >= 2);
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+        socket.EnqueueIncoming(GroupMessage(CreateBrokerHeartbeatEnvelope(session, nonce: "nonce-refresh", timeoutSeconds: 5)));
+        await WaitForAsync(() => socket.SentTexts.Count >= 3);
+
+        clock.Advance(TimeSpan.FromSeconds(3));
+        delay.ReleaseNext();
+        await Task.Delay(100);
+
+        Assert.Equal(MessageConnectionState.Connected, service.CurrentStatus.State);
+        Assert.Equal(WebSocketState.Open, socket.State);
+    }
+
+    [Fact]
+    public async Task ReconnectAsyncAfterHeartbeatTimeoutRequestsReplayFromLastAcknowledgedSequence()
+    {
+        var session = CreateSession();
+        var clock = new MutableClock(new DateTimeOffset(2026, 03, 26, 10, 00, 00, TimeSpan.Zero));
+        var delay = new ControlledDelay();
+        var firstSocket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-heartbeat-1")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        var secondSocket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-heartbeat-2")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        await using var service = CreateService(
+            new RecordingNegotiationClient(CreateNegotiationResponse(session, refreshAtUtc: DateTimeOffset.MinValue)),
+            clock.GetUtcNow,
+            delay.DelayAsync,
+            firstSocket,
+            secondSocket);
+        await service.PrepareForSessionAsync(session);
+
+        firstSocket.EnqueueIncoming(GroupMessage(CreateBrokerEnvelope(session, sequence: 1)));
+        await WaitForAsync(() => service.RecentTraffic.Count == 1);
+
+        firstSocket.EnqueueIncoming(GroupMessage(CreateBrokerHeartbeatEnvelope(session, nonce: "nonce-reconnect", timeoutSeconds: 3)));
+        await WaitForAsync(() => delay.RequestedDelays.Count == 1 && firstSocket.SentTexts.Count >= 2);
+
+        clock.Advance(TimeSpan.FromSeconds(4));
+        delay.ReleaseNext();
+        await WaitForAsync(() => service.CurrentStatus.State == MessageConnectionState.Faulted);
+
+        var reconnectStatus = await service.ReconnectAsync();
+        await WaitForAsync(() => secondSocket.SentTexts.Count >= 2);
+
+        using var replayCommand = JsonDocument.Parse(secondSocket.SentTexts[1]);
+        var replayRequest = replayCommand.RootElement.GetProperty("data")
+            .Deserialize<MessageEnvelope<ReplayRequestPayload>>(SessionMessageSerializer.DefaultOptions);
+
+        Assert.NotNull(replayRequest);
+        Assert.Equal(MessageConnectionState.Connected, reconnectStatus.State);
+        Assert.Equal(ReplayRequestReason.ReconnectResume, replayRequest!.Payload.Reason);
+        Assert.Equal(2, replayRequest.Payload.FromSequenceInclusive);
+        Assert.Equal(1, replayRequest.AcknowledgedSequence);
+    }
+
+    [Fact]
     public async Task PrepareForSessionAsync_WithResumeStateRequestsClientRecoveryReplay()
     {
         var session = CreateSession();
@@ -1342,6 +1529,30 @@ public sealed class PubSubConnectionServiceTests
             }
         };
 
+    private static MessageEnvelope<HeartbeatPayload> CreateBrokerHeartbeatEnvelope(
+        SessionDescriptor session,
+        string nonce,
+        int timeoutSeconds = SessionHeartbeatDefaults.LivenessTimeoutSeconds,
+        int expectedIntervalSeconds = SessionHeartbeatDefaults.ExpectedIntervalSeconds) =>
+        new()
+        {
+            ProjectId = session.ProjectId,
+            SessionId = session.SessionId,
+            Generation = SessionEnvelopeContract.InitialGeneration,
+            MessageType = SessionMessageType.Heartbeat,
+            Direction = MessageDirection.BrokerToClient,
+            TimestampUtc = DateTimeOffset.UtcNow,
+            MessageId = $"heartbeat-{nonce}",
+            CorrelationId = $"broker-session:{session.SessionId}",
+            Payload = new HeartbeatPayload
+            {
+                ExpectedIntervalSeconds = expectedIntervalSeconds,
+                LivenessTimeoutSeconds = timeoutSeconds,
+                SenderInstanceId = "broker-tests",
+                Nonce = nonce
+            }
+        };
+
     private static MessageEnvelope<ReplayResponsePayload> CreateReplayResponseEnvelope(
         SessionDescriptor session,
         long generation = SessionEnvelopeContract.InitialGeneration,
@@ -1591,6 +1802,33 @@ public sealed class PubSubConnectionServiceTests
             }
 
             _pendingDelays.Dequeue().TrySetResult(true);
+        }
+    }
+
+    private sealed class MutableClock
+    {
+        private readonly object _sync = new();
+        private DateTimeOffset _utcNow;
+
+        public MutableClock(DateTimeOffset utcNow)
+        {
+            _utcNow = utcNow;
+        }
+
+        public DateTimeOffset GetUtcNow()
+        {
+            lock (_sync)
+            {
+                return _utcNow;
+            }
+        }
+
+        public void Advance(TimeSpan delta)
+        {
+            lock (_sync)
+            {
+                _utcNow = _utcNow.Add(delta);
+            }
         }
     }
 

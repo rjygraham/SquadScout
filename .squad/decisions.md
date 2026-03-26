@@ -4,6 +4,7 @@
 
 - **2026-03-26: User directive.** By Ryan Graham (via Copilot). For Phase 2 work, keep work on separate branches, reference the issue in commit messages and PR messages, and only merge when the branch is clean.
 - **2026-03-26: Neo — Phase 2 Execution Map.** Dependency-correct 5-wave plan for all 9 open Phase 2 issues. Critical path: #18 → #19 → #21 → {#22 ‖ #23} → #24. Wave 0 starts now: Link → #18, Switch → #54, Switch → #55. Decision: #55 starts immediately (zero Orleans dependency, orthogonal to #54). Full map in `.squad/decisions/inbox/neo-phase2-map.md`.
+- **2026-03-26: Morpheus — Issue #22 Heartbeat & Liveness Model.** Keep replay/ack state on the top-level envelope, but extend `HeartbeatPayload` with broker-issued nonce challenge/ack fields plus shared interval/timeout metadata. Broker liveness tracking lives beside the PTY relay (not inside grains), times out on missing accepted client activity, and emits non-replayable heartbeat frames. The MAUI transport answers heartbeat challenges on the existing upstream path, faults the live transport when broker heartbeats expire, and preserves reconnect-by-replay semantics rather than inventing a second recovery contract.
 
 ## 2026-03-25
 
@@ -283,7 +284,7 @@ dotnet test .\SquadScout.slnx -nologo --no-build
 **Key decisions:**
 
 - Acknowledgement remains top-level `AcknowledgedSequence` (single source of truth)
-- Heartbeat payloads carry only liveness metadata (`ReplayRequested`, `ExpectedIntervalSeconds`, `SenderInstanceId`) to avoid duplicate ack state
+- Heartbeat payloads carry liveness metadata plus nonce challenge/ack fields; broker sequence ack remains top-level `AcknowledgedSequence`
 - Replay responses explicitly publish requested range and available window (`AvailableFromSequence`, `AvailableToSequence`, `GapDetected`) so reconnect overflow is explicit
 - Backward compatibility rule for contract version 1: additive optional members and new message types allowed; renames, removals, or sequence/ack semantic changes require major version bump
 

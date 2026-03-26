@@ -12,6 +12,9 @@ namespace SquadScout.App.Services;
 public sealed class MessagingConnectionService : IMessageConnectionService, IAsyncDisposable
 {
     private const string WebPubSubSubprotocol = "json.webpubsub.azure.v1";
+    private static readonly TimeSpan TokenRefreshLeadTime = TimeSpan.FromMinutes(5);
+    private const string HeartbeatTimeoutFailureReason =
+        "The broker heartbeat timed out before the session stream could confirm liveness. Retry live transport to reconnect and request replay.";
 
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
     private readonly MessagingOptions _messagingOptions;
@@ -26,6 +29,8 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
     private PubSubNegotiateResponse? _negotiation;
     private CancellationTokenSource? _refreshLoopCts;
     private Task? _refreshLoopTask;
+    private CancellationTokenSource? _livenessMonitorCts;
+    private Task? _livenessMonitorTask;
     private IWebPubSubSocket? _socket;
     private CancellationTokenSource? _receiveLoopCts;
     private Task? _receiveLoopTask;
@@ -40,8 +45,10 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
     private readonly HashSet<long> _observedBrokerSequences = new();
     private readonly HashSet<long> _appliedBrokerSequences = new();
     private readonly HashSet<string> _appliedReplayResponseMessageIds = new(StringComparer.Ordinal);
+    private readonly string _clientInstanceId = $"mobile-{Guid.NewGuid():n}";
     private bool _gapDetected;
     private bool _replayRequestPending;
+    private DateTimeOffset? _brokerHeartbeatDeadlineUtc;
 
     public MessagingConnectionService(
         MessagingOptions messagingOptions,
@@ -514,6 +521,11 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             return true;
         }
 
+        if (envelope.MessageType == SessionMessageType.Heartbeat)
+        {
+            return await ProcessBrokerHeartbeatAsync(envelope, tracking, cancellationToken).ConfigureAwait(false);
+        }
+
         if (envelope.MessageType == SessionMessageType.ReplayResponse)
         {
             return await ApplyReplayResponseAsync(envelope, tracking, cancellationToken).ConfigureAwait(false);
@@ -543,6 +555,58 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             QueueReplayRequest(ReplayRequestReason.GapDetected, cancellationToken);
         }
 
+        return true;
+    }
+
+    private async Task<bool> ProcessBrokerHeartbeatAsync(
+        MessageEnvelope<JsonElement> envelope,
+        BrokerEnvelopeTrackingResult tracking,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var payload = envelope.Payload.Deserialize<HeartbeatPayload>(SessionMessageSerializer.DefaultOptions)
+            ?? throw new InvalidOperationException("Azure Web PubSub delivered a malformed heartbeat payload.");
+
+        if (string.IsNullOrWhiteSpace(payload.Nonce))
+        {
+            PublishReceiveFault("The live session stream delivered a heartbeat without a nonce challenge.");
+            return false;
+        }
+
+        var timeoutSeconds = payload.LivenessTimeoutSeconds ?? SessionHeartbeatDefaults.LivenessTimeoutSeconds;
+        if (timeoutSeconds <= 0)
+        {
+            PublishReceiveFault("The live session stream delivered a heartbeat with an invalid liveness timeout.");
+            return false;
+        }
+
+        if (tracking.ShouldAppend)
+        {
+            AppendTraffic(
+                new MessageEnvelopeTraffic
+                {
+                    Direction = MessageTrafficDirection.Incoming,
+                    Envelope = ToJsonEnvelope(envelope),
+                    ObservedAtUtc = _utcNow(),
+                    Summary = $"Received heartbeat for session '{envelope.SessionId}'."
+                });
+        }
+
+        lock (_stateSync)
+        {
+            _brokerHeartbeatDeadlineUtc = _utcNow().AddSeconds(timeoutSeconds);
+        }
+
+        EnsureHeartbeatMonitorStarted();
+
+        if (CurrentStatus.State != MessageConnectionState.Connected)
+        {
+            return true;
+        }
+
+        var acknowledgement = CreateHeartbeatAcknowledgementEnvelope(payload);
+        QueueHeartbeatAcknowledgement(acknowledgement, cancellationToken);
         return true;
     }
 
@@ -888,6 +952,77 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         }
     }
 
+    private MessageEnvelope<HeartbeatPayload> CreateHeartbeatAcknowledgementEnvelope(HeartbeatPayload brokerHeartbeat)
+    {
+        if (string.IsNullOrWhiteSpace(brokerHeartbeat.Nonce))
+        {
+            throw new InvalidOperationException("Broker heartbeat acknowledgements require a nonce.");
+        }
+
+        lock (_stateSync)
+        {
+            if (_activeSession is null)
+            {
+                throw new InvalidOperationException("An active session is required before heartbeat acknowledgements can be sent.");
+            }
+
+            var nextClientSequence = ++_nextClientSequence;
+            return new MessageEnvelope<HeartbeatPayload>
+            {
+                ProjectId = _activeSession.ProjectId,
+                SessionId = _activeSession.SessionId,
+                Generation = _currentGeneration,
+                MessageType = SessionMessageType.Heartbeat,
+                Direction = MessageDirection.ClientToBroker,
+                ClientSequence = nextClientSequence,
+                AcknowledgedSequence = _acknowledgedSequence,
+                TimestampUtc = _utcNow(),
+                MessageId = $"heartbeat-{_activeSession.SessionId}-{nextClientSequence}",
+                CorrelationId = $"mobile-session:{_activeSession.SessionId}",
+                Payload = new HeartbeatPayload
+                {
+                    ReplayRequested = _currentStatus.IsReplayPending,
+                    ExpectedIntervalSeconds = brokerHeartbeat.ExpectedIntervalSeconds,
+                    LivenessTimeoutSeconds = brokerHeartbeat.LivenessTimeoutSeconds,
+                    SenderInstanceId = _clientInstanceId,
+                    AcknowledgedNonce = brokerHeartbeat.Nonce
+                }
+            };
+        }
+    }
+
+    private void QueueHeartbeatAcknowledgement(
+        MessageEnvelope<HeartbeatPayload> heartbeat,
+        CancellationToken cancellationToken)
+    {
+        _ = RunHeartbeatAcknowledgementAsync(heartbeat, cancellationToken);
+    }
+
+    private async Task RunHeartbeatAcknowledgementAsync(
+        MessageEnvelope<HeartbeatPayload> heartbeat,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await SendEnvelopeCoreAsync(heartbeat, requireConnectedStatus: true, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _operationGate.Release();
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            PublishReceiveFault($"The live session stream could not acknowledge heartbeat: {ex.Message}");
+        }
+    }
+
     private async Task SendJoinGroupAsync(IWebPubSubSocket socket, string sessionGroup, CancellationToken cancellationToken)
     {
         var ackId = Interlocked.Increment(ref _nextAckId);
@@ -978,9 +1113,11 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             });
     }
 
-    private async Task CleanupTransportAsync(CancellationToken cancellationToken)
+    private async Task CleanupTransportAsync(CancellationToken cancellationToken, bool skipAwaitLivenessMonitor = false)
     {
         CancellationTokenSource? refreshLoopCts;
+        CancellationTokenSource? livenessMonitorCts;
+        Task? livenessMonitorTask;
         IWebPubSubSocket? socket;
         CancellationTokenSource? receiveLoopCts;
         Task? receiveLoopTask;
@@ -990,6 +1127,10 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             refreshLoopCts = _refreshLoopCts;
             _refreshLoopTask = null;
             _refreshLoopCts = null;
+            livenessMonitorCts = _livenessMonitorCts;
+            livenessMonitorTask = _livenessMonitorTask;
+            _livenessMonitorCts = null;
+            _livenessMonitorTask = null;
             socket = _socket;
             receiveLoopCts = _receiveLoopCts;
             receiveLoopTask = _receiveLoopTask;
@@ -997,6 +1138,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             _receiveLoopCts = null;
             _receiveLoopTask = null;
             _connectionId = null;
+            _brokerHeartbeatDeadlineUtc = null;
         }
 
         foreach (var (_, pendingAck) in _pendingAcks.ToArray())
@@ -1006,6 +1148,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
 
         _pendingAcks.Clear();
         refreshLoopCts?.Cancel();
+        livenessMonitorCts?.Cancel();
         receiveLoopCts?.Cancel();
 
         if (socket is not null)
@@ -1036,7 +1179,19 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             }
         }
 
+        if (!skipAwaitLivenessMonitor && livenessMonitorTask is not null)
+        {
+            try
+            {
+                await livenessMonitorTask.ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+        }
+
         refreshLoopCts?.Dispose();
+        livenessMonitorCts?.Dispose();
         receiveLoopCts?.Dispose();
     }
 
@@ -1103,6 +1258,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             ResetBrokerOrderingStateLocked(SessionEnvelopeContract.InitialGeneration);
             _nextAckId = 0;
             _nextClientSequence = 0;
+            _brokerHeartbeatDeadlineUtc = null;
             if (clearTraffic)
             {
                 _recentTraffic = [];
@@ -1353,6 +1509,102 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
     {
         await CleanupTransportAsync(CancellationToken.None).ConfigureAwait(false);
         PublishStatus(CreateFaultedStatus(session, CurrentStatus.ReconnectAttempt, failureReason));
+    }
+
+    private void EnsureHeartbeatMonitorStarted()
+    {
+        lock (_stateSync)
+        {
+            if (_livenessMonitorTask is not null && !_livenessMonitorTask.IsCompleted)
+            {
+                return;
+            }
+
+            _livenessMonitorCts = new CancellationTokenSource();
+            _livenessMonitorTask = Task.Run(
+                () => MonitorHeartbeatTimeoutAsync(_livenessMonitorCts.Token),
+                CancellationToken.None);
+        }
+    }
+
+    private async Task MonitorHeartbeatTimeoutAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            DateTimeOffset? deadlineUtc;
+            lock (_stateSync)
+            {
+                deadlineUtc = _brokerHeartbeatDeadlineUtc;
+            }
+
+            if (deadlineUtc is null)
+            {
+                try
+                {
+                    await _delayAsync(TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                continue;
+            }
+
+            var delay = deadlineUtc.Value - _utcNow();
+            if (delay <= TimeSpan.Zero)
+            {
+                await HandleBrokerHeartbeatTimeoutAsync(deadlineUtc.Value).ConfigureAwait(false);
+                continue;
+            }
+
+            try
+            {
+                await _delayAsync(delay, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            bool shouldTimeout;
+            lock (_stateSync)
+            {
+                shouldTimeout = _brokerHeartbeatDeadlineUtc is DateTimeOffset currentDeadlineUtc &&
+                                currentDeadlineUtc == deadlineUtc.Value &&
+                                currentDeadlineUtc <= _utcNow();
+            }
+
+            if (!shouldTimeout)
+            {
+                continue;
+            }
+
+            await HandleBrokerHeartbeatTimeoutAsync(deadlineUtc.Value).ConfigureAwait(false);
+        }
+    }
+
+    private async Task HandleBrokerHeartbeatTimeoutAsync(DateTimeOffset expectedDeadlineUtc)
+    {
+        SessionDescriptor? session;
+        int reconnectAttempt;
+        lock (_stateSync)
+        {
+            if (_activeSession is null ||
+                _currentStatus.State != MessageConnectionState.Connected ||
+                _brokerHeartbeatDeadlineUtc is not DateTimeOffset currentDeadlineUtc ||
+                currentDeadlineUtc != expectedDeadlineUtc ||
+                currentDeadlineUtc > _utcNow())
+            {
+                return;
+            }
+
+            session = _activeSession;
+            reconnectAttempt = _currentStatus.ReconnectAttempt;
+        }
+
+        await CleanupTransportAsync(CancellationToken.None, skipAwaitLivenessMonitor: true).ConfigureAwait(false);
+        PublishStatus(CreateFaultedStatus(session, reconnectAttempt, HeartbeatTimeoutFailureReason));
     }
 
     private void PublishStatus(MessageConnectionStatus status)
@@ -1645,6 +1897,7 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
     private static string ResolveUpstreamEventName(SessionMessageType messageType) =>
         messageType switch
         {
+            SessionMessageType.Heartbeat => SessionUpstreamEventNames.Heartbeat,
             SessionMessageType.Input => SessionUpstreamEventNames.Input,
             SessionMessageType.ReplayRequest => SessionUpstreamEventNames.ReplayRequest,
             _ => throw new ArgumentOutOfRangeException(

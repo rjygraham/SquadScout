@@ -348,6 +348,7 @@ public sealed class OrleansSessionGrainTests
             orchestrator,
             ptyHost,
             new PtySessionEnvelopePump(orchestrator),
+            new SessionLivenessManager(TimeProvider.System, senderInstanceId: "broker-tests"),
             new SessionGroupResolver(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemorySessionRelay>.Instance);
 

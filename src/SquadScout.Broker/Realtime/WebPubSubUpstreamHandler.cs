@@ -17,12 +17,14 @@ public sealed class WebPubSubUpstreamHandler
     public const string CloudEventTypeHeaderName = "ce-type";
     public const string CloudEventConnectionIdHeaderName = "ce-connectionId";
 
+    private static readonly string HeartbeatCloudEventType = $"azure.webpubsub.user.{SessionUpstreamEventNames.Heartbeat}";
     private static readonly string InputCloudEventType = $"azure.webpubsub.user.{SessionUpstreamEventNames.Input}";
     private static readonly string ReplayCloudEventType = $"azure.webpubsub.user.{SessionUpstreamEventNames.ReplayRequest}";
 
     private readonly WebPubSubUpstreamAuthenticator _authenticator;
     private readonly ISessionRelay _sessionRelay;
     private readonly ISessionOrchestrator _orchestrator;
+    private readonly ISessionLivenessManager _livenessManager;
     private readonly IRelayPublisher _relayPublisher;
     private readonly ILogger<WebPubSubUpstreamHandler> _logger;
 
@@ -30,12 +32,14 @@ public sealed class WebPubSubUpstreamHandler
         WebPubSubUpstreamAuthenticator authenticator,
         ISessionRelay sessionRelay,
         ISessionOrchestrator orchestrator,
+        ISessionLivenessManager livenessManager,
         IRelayPublisher relayPublisher,
         ILogger<WebPubSubUpstreamHandler> logger)
     {
         _authenticator = authenticator ?? throw new ArgumentNullException(nameof(authenticator));
         _sessionRelay = sessionRelay ?? throw new ArgumentNullException(nameof(sessionRelay));
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
+        _livenessManager = livenessManager ?? throw new ArgumentNullException(nameof(livenessManager));
         _relayPublisher = relayPublisher ?? throw new ArgumentNullException(nameof(relayPublisher));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -130,10 +134,79 @@ public sealed class WebPubSubUpstreamHandler
 
         return envelope.MessageType switch
         {
+            SessionMessageType.Heartbeat => await HandleHeartbeatAsync(jsonBody, sessionGroup, connectionId, allowedOrigin, cancellationToken).ConfigureAwait(false),
             SessionMessageType.Input => await HandleInputAsync(jsonBody, sessionGroup, connectionId, allowedOrigin, cancellationToken).ConfigureAwait(false),
             SessionMessageType.ReplayRequest => await HandleReplayAsync(jsonBody, sessionGroup, connectionId, allowedOrigin, cancellationToken).ConfigureAwait(false),
-            _ => Error(HttpStatusCode.BadRequest, allowedOrigin, "The upstream request must contain an input or replay-request envelope.")
+            _ => Error(HttpStatusCode.BadRequest, allowedOrigin, "The upstream request must contain a heartbeat, input, or replay-request envelope.")
         };
+    }
+
+    private async Task<WebPubSubUpstreamResponse> HandleHeartbeatAsync(
+        string jsonBody,
+        string sessionGroup,
+        string? connectionId,
+        string? allowedOrigin,
+        CancellationToken cancellationToken)
+    {
+        MessageEnvelope<HeartbeatPayload>? envelope;
+        try
+        {
+            envelope = JsonSerializer.Deserialize<MessageEnvelope<HeartbeatPayload>>(jsonBody, SessionMessageSerializer.DefaultOptions);
+        }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException)
+        {
+            return Error(HttpStatusCode.BadRequest, allowedOrigin, "The upstream request body must be a valid JSON heartbeat envelope.");
+        }
+
+        if (envelope?.Payload is null)
+        {
+            return Error(HttpStatusCode.BadRequest, allowedOrigin, "The upstream request body is required.");
+        }
+
+        if (envelope.MessageType != SessionMessageType.Heartbeat)
+        {
+            return Error(HttpStatusCode.BadRequest, allowedOrigin, "The upstream request must contain a heartbeat envelope.");
+        }
+
+        if (!_livenessManager.CanAcceptHeartbeat(envelope.SessionId, envelope.Payload, out var validationError))
+        {
+            _logger.LogWarning(
+                "Rejected Azure Web PubSub heartbeat {MessageId} for project {ProjectId} session {SessionId} through session group {SessionGroup} from connection {ConnectionId}: {FailureMessage}",
+                envelope.MessageId,
+                envelope.ProjectId,
+                envelope.SessionId,
+                sessionGroup,
+                connectionId ?? "<missing>",
+                validationError);
+
+            return Error(HttpStatusCode.BadRequest, allowedOrigin, validationError);
+        }
+
+        try
+        {
+            var validation = await _orchestrator.ValidateClientMessageAsync(envelope.SessionId, envelope, cancellationToken).ConfigureAwait(false);
+            if (validation.IsAccepted && validation.Status != SequenceValidationStatus.Duplicate)
+            {
+                if (!_livenessManager.TryCommitHeartbeat(envelope.SessionId, envelope.Payload))
+                {
+                    return Error(HttpStatusCode.BadRequest, allowedOrigin, "Heartbeat acknowledgement could not be applied because the nonce was no longer valid.");
+                }
+            }
+
+            return CreateValidationResponse(validation, allowedOrigin);
+        }
+        catch (ArgumentException ex)
+        {
+            return Error(HttpStatusCode.BadRequest, allowedOrigin, ex.Message);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return JsonResponse(HttpStatusCode.NotFound, allowedOrigin, new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return JsonResponse(HttpStatusCode.Conflict, allowedOrigin, new { message = ex.Message });
+        }
     }
 
     private async Task<WebPubSubUpstreamResponse> HandleInputAsync(
@@ -246,6 +319,7 @@ public sealed class WebPubSubUpstreamHandler
         {
             var replayResponse = await _orchestrator.ReplayAsync(envelope.SessionId, envelope, cancellationToken).ConfigureAwait(false);
             await _relayPublisher.PublishEnvelopeAsync(replayResponse, cancellationToken).ConfigureAwait(false);
+            _livenessManager.RecordClientActivity(envelope.SessionId);
 
             _logger.LogDebug(
                 "Published replay response {ReplayMessageId} for replay request {ReplayRequestMessageId} for project {ProjectId} session {SessionId} through session group {SessionGroup} from connection {ConnectionId}.",
@@ -296,6 +370,7 @@ public sealed class WebPubSubUpstreamHandler
         };
 
     private static bool IsSupportedEventType(string eventType) =>
+        string.Equals(eventType, HeartbeatCloudEventType, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(eventType, InputCloudEventType, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(eventType, ReplayCloudEventType, StringComparison.OrdinalIgnoreCase);
 
