@@ -14,7 +14,8 @@ public sealed class SessionGrain : Grain, ISessionGrain
     private readonly object _loadGateSync = new();
     private LoadGateState _loadGate = new();
     private SessionRuntimeState? _runtime;
-    private bool _stateLoaded;
+    private volatile bool _isDeactivating;
+    private volatile bool _stateLoaded;
 
     public SessionGrain(
         [PersistentState("session", OrleansHostOptions.DefaultStorageProvider)]
@@ -26,12 +27,14 @@ public sealed class SessionGrain : Grain, ISessionGrain
 
     public override async Task OnActivateAsync(CancellationToken cancellationToken)
     {
+        _isDeactivating = false;
         await EnsureRuntimeLoadedAsync().ConfigureAwait(true);
         await base.OnActivateAsync(cancellationToken).ConfigureAwait(true);
     }
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
+        _isDeactivating = true;
         _runtime = null;
         _stateLoaded = false;
         RetireLoadGate();
@@ -189,7 +192,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
 
     private async Task EnsureRuntimeLoadedAsync()
     {
-        if (_stateLoaded)
+        if (_stateLoaded || _isDeactivating)
         {
             return;
         }
@@ -198,7 +201,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
         await loadGate.Semaphore.WaitAsync().ConfigureAwait(true);
         try
         {
-            if (_stateLoaded)
+            if (_stateLoaded || _isDeactivating || loadGate.IsRetired)
             {
                 return;
             }
