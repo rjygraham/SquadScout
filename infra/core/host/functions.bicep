@@ -74,7 +74,7 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
     serverFarmId: appServicePlan.id
     httpsOnly: true
     siteConfig: {
-      linuxFxVersion: '${upper(runtime)}|${runtimeVersion}'
+      linuxFxVersion: '${toUpper(runtime)}|${runtimeVersion}'
       ftpsState: 'Disabled'
       minTlsVersion: '1.2'
       use32BitWorkerProcess: false

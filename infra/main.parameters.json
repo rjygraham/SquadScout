@@ -7,9 +7,6 @@
     },
     "location": {
       "value": "${AZURE_LOCATION=eastus}"
-    },
-    "principalId": {
-      "value": "${AZURE_PRINCIPAL_ID=}"
     }
   }
 }

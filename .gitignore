@@ -14,3 +14,8 @@ TestResults/
 
 # Azure Functions local configuration
 local.settings.json
+
+# Bicep compiled ARM templates
+infra/**/*.json
+!infra/main.parameters.json
+!infra/abbreviations.json

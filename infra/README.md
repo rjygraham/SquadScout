@@ -69,7 +69,6 @@ Required parameters in `main.bicep`:
 |-----------|-------------|---------|---------|
 | `environmentName` | Environment name (used for resource naming) | (required) | `dev`, `staging`, `prod` |
 | `location` | Azure region for all resources | (required) | `eastus`, `westus2` |
-| `principalId` | Optional: Azure AD principal for additional RBAC | `""` | GUID of user/service principal |
 
 ### Deployment Outputs
 
