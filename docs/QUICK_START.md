@@ -11,7 +11,7 @@ cd src/SquadScout.Broker
 dotnet run
 ```
 
-Broker is live at `http://127.0.0.1:5071`.
+`dotnet run` uses the broker launch settings, so the standalone broker is live at `http://localhost:5050`.
 
 ### Full Stack (Broker + Functions + MAUI)
 
@@ -20,21 +20,21 @@ cd src/SquadScout.AppHost
 dotnet run
 ```
 
-All services start; dashboard at `http://localhost:18888`.
+The AppHost UI starts on `http://localhost:15284` (`https://localhost:17090` for the HTTPS profile).
 
 ## First Steps
 
 ### 1. Verify Broker is Running
 
 ```bash
-curl http://127.0.0.1:5071/health
+curl http://localhost:5050/health
 # Expected: 200 OK
 ```
 
 ### 2. Register a Project
 
 ```bash
-curl -X POST http://127.0.0.1:5071/api/projects \
+curl -X POST http://localhost:5050/api/projects \
   -H "Content-Type: application/json" \
   -d '{
     "projectId": "my-project",
@@ -46,16 +46,16 @@ curl -X POST http://127.0.0.1:5071/api/projects \
 ### 3. List Projects
 
 ```bash
-curl http://127.0.0.1:5071/api/projects
+curl http://localhost:5050/api/projects
 ```
 
 ## Troubleshooting Quick Fixes
 
 | Problem | Fix |
 |---------|-----|
-| Port 5071 in use | `taskkill /PID <PID> /F` or use `--Broker:ListenUrl="http://127.0.0.1:5072"` |
-| `copilot` not found | Install Copilot CLI or set `--CopilotPty:ExecutablePath="/path/to/copilot"` |
-| Aspire dashboard won't load | Check that `dotnet run` started successfully; dashboard is at `http://localhost:18888` |
+| Port 5050 in use | `taskkill /PID <PID> /F` or run `dotnet run --no-launch-profile -- --Broker:ListenUrl="http://127.0.0.1:5072"` |
+| `copilot` not found | Install Copilot CLI or start with `dotnet run -- --CopilotPty:ExecutablePath="/path/to/copilot"` |
+| AppHost UI won't load | Check that `dotnet run` started successfully; launch-settings URLs are `http://localhost:15284` and `https://localhost:17090` |
 
 ## Full Configuration Guide
 

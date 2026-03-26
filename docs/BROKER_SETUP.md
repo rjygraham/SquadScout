@@ -22,11 +22,12 @@ Run the broker directly for isolated testing and debugging:
 
 ```bash
 cd src/SquadScout.Broker
-dotnet run --launch-profile Development
+dotnet run
 ```
 
-**Defaults (appsettings.json):**
-- **Listen URL:** `http://127.0.0.1:5071`
+**Current launch behavior:**
+- **Standalone `dotnet run`:** `launchSettings.json` selects `http://localhost:5050`
+- **Config fallback (`appsettings.json`):** `Broker:ListenUrl = http://127.0.0.1:5071` when launch settings are bypassed (for example `dotnet run --no-launch-profile`)
 - **Project Registry:** `.squadscout/projects.json` (in-memory, not persisted)
 - **Copilot Executable:** `copilot` (from PATH)
 - **PTY Buffer:** 1024 characters; 30 rows × 120 columns
@@ -42,11 +43,12 @@ dotnet run
 ```
 
 This launches:
+- **AppHost UI** at `http://localhost:15284` (`https://localhost:17090` for the HTTPS profile)
 - **Broker** at `http://localhost:5071`
 - **Azure Functions** referencing broker
 - **MAUI App** (Windows) with broker connection
 
-Aspire dashboard available at `http://localhost:18888` to monitor all services.
+Watch the AppHost console if you need the exact local URLs echoed at startup.
 
 ## Configuration
 
@@ -67,13 +69,13 @@ All broker settings are **environment-driven** via `appsettings.json` and overri
 
 | Setting | Type | Default | Notes |
 |---------|------|---------|-------|
-| `ListenUrl` | string | `http://127.0.0.1:5071` | HTTP server bind address. Use `http://localhost:5071` for remote calls; `http://127.0.0.1:5071` restricts to loopback. |
+| `ListenUrl` | string | `http://127.0.0.1:5071` | Fallback HTTP bind address. `dotnet run` normally uses `launchSettings.json` (`http://localhost:5050`), and AppHost injects its own broker endpoint through `ASPNETCORE_URLS`. |
 | `ProjectRegistryPath` | string | `.squadscout\projects.json` | Relative path for persisting registered projects. Not yet implemented; in-memory catalog used. |
 
 **Override at runtime:**
 
 ```bash
-dotnet run --Broker:ListenUrl="http://0.0.0.0:5071"
+dotnet run --no-launch-profile -- --Broker:ListenUrl="http://0.0.0.0:5071"
 ```
 
 ### Copilot PTY Configuration
@@ -109,7 +111,7 @@ dotnet run --Broker:ListenUrl="http://0.0.0.0:5071"
 **Override at runtime:**
 
 ```bash
-dotnet run \
+dotnet run -- \
   --CopilotPty:ExecutablePath="/custom/path/to/copilot" \
   --CopilotPty:InitialRows=50 \
   --CopilotPty:InitialColumns=160
@@ -140,7 +142,7 @@ dotnet run \
 3. Set via environment or config:
 
    ```bash
-   dotnet run --AzureWebPubSub:ConnectionString="<your-connection-string>"
+   dotnet run -- --AzureWebPubSub:ConnectionString="<your-connection-string>"
    ```
 
    Or in `appsettings.Development.json`:
@@ -228,7 +230,7 @@ Projects are registered via REST API. Each project must have:
 **Example:**
 
 ```bash
-curl -X POST http://127.0.0.1:5071/api/projects \
+curl -X POST http://localhost:5050/api/projects \
   -H "Content-Type: application/json" \
   -d '{
     "projectId": "squadscout-repo",
@@ -255,28 +257,28 @@ dotnet test SquadScout.slnx
 
 ```bash
 cd src/SquadScout.Broker
-dotnet run --launch-profile Development
+dotnet run
 ```
 
 Expected output:
 ```
 info: SquadScout.Broker[0]
-      Now listening on: http://127.0.0.1:5071
+      Now listening on: http://localhost:5050
 ```
 
 ### 3. Test Endpoints
 
 ```bash
 # Health check
-curl http://127.0.0.1:5071/health
+curl http://localhost:5050/health
 
 # Register a project
-curl -X POST http://127.0.0.1:5071/api/projects \
+curl -X POST http://localhost:5050/api/projects \
   -H "Content-Type: application/json" \
   -d '{"projectId": "test", "displayName": "Test Project", "repositoryRoot": "."}'
 
 # List projects
-curl http://127.0.0.1:5071/api/projects
+curl http://localhost:5050/api/projects
 ```
 
 ### 4. Run Full Stack (Aspire)
@@ -286,7 +288,7 @@ cd src/SquadScout.AppHost
 dotnet run
 ```
 
-Open `http://localhost:18888` to see all services running.
+Open `http://localhost:15284` (or `https://localhost:17090`) to see all services running.
 
 ## Troubleshooting
 
@@ -294,12 +296,12 @@ Open `http://localhost:18888` to see all services running.
 
 **Error:** `The address is already in use.`
 
-- **Cause:** Port 5071 is occupied.
+- **Cause:** Port 5050 is occupied when using the default launch profile.
 - **Solution:** Kill the process using the port or change `ListenUrl` in config.
 
 ```bash
-# Find and kill process on port 5071 (Windows)
-netstat -ano | findstr :5071
+# Find and kill process on port 5050 (Windows)
+netstat -ano | findstr :5050
 taskkill /PID <PID> /F
 ```
 
@@ -315,7 +317,7 @@ taskkill /PID <PID> /F
 copilot --version
 
 # If not on PATH, set ExecutablePath to full path
-dotnet run --CopilotPty:ExecutablePath="C:\Program Files\GitHub\Copilot\copilot.exe"
+ dotnet run -- --CopilotPty:ExecutablePath="C:\Program Files\GitHub\Copilot\copilot.exe"
 ```
 
 ### PTY buffer overflow
@@ -326,7 +328,7 @@ dotnet run --CopilotPty:ExecutablePath="C:\Program Files\GitHub\Copilot\copilot.
 - **Solution:** Increase limit in config or send smaller chunks.
 
 ```bash
-dotnet run --CopilotPty:MaxInputCharactersPerWrite=8192
+dotnet run -- --CopilotPty:MaxInputCharactersPerWrite=8192
 ```
 
 ### Session starts but no output
@@ -336,7 +338,7 @@ dotnet run --CopilotPty:MaxInputCharactersPerWrite=8192
 - **Workaround:** Increase `OutputBufferSize` and/or `InitialRows` to capture more terminal state.
 
 ```bash
-dotnet run \
+dotnet run -- \
   --CopilotPty:OutputBufferSize=2048 \
   --CopilotPty:InitialRows=50
 ```
@@ -350,7 +352,7 @@ dotnet run \
 
 ```bash
 # Disable relay (standalone mode)
-dotnet run --AzureWebPubSub:ConnectionString=""
+dotnet run -- --AzureWebPubSub:ConnectionString=""
 ```
 
 ## Standalone vs. Full Stack
@@ -365,9 +367,9 @@ dotnet run --AzureWebPubSub:ConnectionString=""
 
 ## Environment Overrides
 
-All `appsettings.json` settings can be overridden via environment variables using the `:` path separator:
+All `appsettings.json` settings can be overridden via environment variables by replacing `:` with `__` in the variable name:
 
-```bash
+```powershell
 # Example: set Broker ListenUrl and Copilot executable
 $env:Broker__ListenUrl = "http://localhost:5072"
 $env:CopilotPty__ExecutablePath = "C:\copilot.exe"
@@ -376,10 +378,10 @@ $env:AzureWebPubSub__ConnectionString = "Endpoint=..."
 dotnet run
 ```
 
-Or inline:
+Or pass application arguments directly:
 
 ```bash
-Broker__ListenUrl="http://localhost:5072" dotnet run
+dotnet run --no-launch-profile -- --Broker:ListenUrl="http://localhost:5072"
 ```
 
 ## Known Limitations (Phase 1)

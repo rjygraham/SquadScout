@@ -52,14 +52,16 @@ dotnet test SquadScout.slnx
 ```bash
 cd src/SquadScout.Broker
 dotnet run
-# Now listening on http://127.0.0.1:5071
+# Launch settings bind http://localhost:5050
+# Use `dotnet run --no-launch-profile` to fall back to Broker:ListenUrl (http://127.0.0.1:5071)
 ```
 
 **Full stack (Aspire orchestration):**
 ```bash
 cd src/SquadScout.AppHost
 dotnet run
-# Aspire dashboard: http://localhost:18888
+# AppHost UI: http://localhost:15284
+# HTTPS launch-settings URL: https://localhost:17090
 ```
 
 ## Documentation
@@ -101,13 +103,13 @@ All broker settings are environment-driven. Key settings:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `Broker:ListenUrl` | `http://127.0.0.1:5071` | HTTP server bind address |
+| `Broker:ListenUrl` | `http://127.0.0.1:5071` | Fallback HTTP bind address when launch settings or AppHost do not inject `ASPNETCORE_URLS` |
 | `CopilotPty:ExecutablePath` | `copilot` | Copilot CLI path |
 | `AzureWebPubSub:ConnectionString` | (empty) | Web PubSub relay (optional) |
 
 Override at runtime:
 ```bash
-dotnet run --Broker:ListenUrl="http://localhost:5072"
+dotnet run --no-launch-profile -- --Broker:ListenUrl="http://localhost:5072"
 ```
 
 See [Broker Setup](./docs/BROKER_SETUP.md) for full configuration reference.
