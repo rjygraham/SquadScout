@@ -11,19 +11,12 @@ public sealed class FunctionsHostOptions
 
     public string WebPubSubHub { get; set; } = "squadscout";
 
-    public string[] WebPubSubUpstreamAccessKeys { get; set; } = [];
-
-    [Required]
-    public string BrokerBaseUrl { get; set; } = "http://127.0.0.1:5071";
-
     [Range(1, 1440)]
     public int TokenLifetimeMinutes { get; set; } = 60;
 
     public string? ManagedIdentityClientId { get; set; }
 
     public bool EnableLocalDevelopmentIdentity { get; set; }
-
-    public string[] TrustedUpstreamPrincipalIds { get; set; } = [];
 
     public string DevelopmentIdentityProvider { get; set; } = "local";
 

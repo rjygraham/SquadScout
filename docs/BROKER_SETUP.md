@@ -2,7 +2,7 @@
 
 ## Overview
 
-The SquadScout Broker is a local .NET host that manages Copilot process I/O via a PTY (pseudo-terminal) interface, orchestrates sessions, and exposes REST APIs for local and remote clients. This guide covers contributor-facing setup and configuration for local development.
+The SquadScout Broker is a local .NET host that manages Copilot process I/O via a PTY (pseudo-terminal) interface, orchestrates sessions, and exposes local admin APIs. Mobile broker operations flow through Azure Web PubSub; the Azure Function is limited to authentication and Web PubSub token minting. This guide covers contributor-facing setup and configuration for local development.
 
 ## Prerequisites
 
@@ -43,7 +43,7 @@ dotnet run
 
 This launches:
 - **Broker** at `http://localhost:5071`
-- **Azure Functions** referencing broker
+- **Azure Functions** for auth/token negotiation only
 - **MAUI App** (Windows) with broker connection
 
 Aspire dashboard available at `http://localhost:18888` to monitor all services.
@@ -123,7 +123,8 @@ dotnet run \
 {
   "AzureWebPubSub": {
     "Hub": "squadscout",
-    "ConnectionString": ""
+    "ConnectionString": "",
+    "TrustedUpstreamPrincipalIds": []
   }
 }
 ```
@@ -132,6 +133,7 @@ dotnet run \
 |---------|------|---------|-------|
 | `Hub` | string | `squadscout` | Web PubSub hub name. Must match negotiation endpoint. |
 | `ConnectionString` | string | `""` (empty) | Azure Web PubSub connection string. If empty, relay is disabled (NullRelayPublisher used). |
+| `TrustedUpstreamPrincipalIds` | string[] | `[]` | Optional Easy Auth allow-list for Azure Web PubSub upstream webhook delivery to `/api/upstream`. |
 
 **To enable Azure Web PubSub:**
 
@@ -145,13 +147,16 @@ dotnet run \
 
    Or in `appsettings.Development.json`:
 
-   ```json
-   {
-     "AzureWebPubSub": {
-       "ConnectionString": "Endpoint=https://...; AccessKey=..."
-     }
-   }
-   ```
+    ```json
+    {
+      "AzureWebPubSub": {
+        "ConnectionString": "Endpoint=https://...; AccessKey=...",
+        "TrustedUpstreamPrincipalIds": [
+          "<web-pubsub-managed-identity-object-id>"
+        ]
+      }
+    }
+    ```
 
 **Without Web PubSub:**
 - Broker runs in **standalone mode**.
@@ -187,7 +192,7 @@ Returns `200 OK` if broker is running. Used by Aspire and load balancers.
 - **Register Project:** `POST /api/projects`
 - **List Projects:** `GET /api/projects`
 
-**Current behavior:** No GET by projectId endpoint exists. Projects are retrieved from the list endpoint.
+**Current behavior:** These are local admin/internal APIs. The MAUI app now requests project lists over the broker control channel on Azure Web PubSub instead of calling these endpoints directly. No GET by projectId endpoint exists. Projects are retrieved from the list endpoint.
 
 See `src/SquadScout.Broker/Program.cs` for endpoint definitions.
 
@@ -207,15 +212,20 @@ See `src/SquadScout.Broker/Program.cs` for endpoint definitions.
 - **Send Input:** `POST /api/sessions/{sessionId}/input`
   - Request body: `MessageEnvelope<InputChunkPayload>` with sequence metadata
   - Returns: Sequence validation result (Accepted/Duplicate/GapDetected/Conflict)
+  - Usage: Local admin/testing path; mobile operational traffic uses Azure Web PubSub instead
+
+- **Azure Web PubSub Upstream:** `POST /api/upstream`
+  - Request body: Azure Web PubSub custom event envelope (`session-input` or `session-replay`)
+  - Returns: `204 No Content` on accepted live input/replay handling, or JSON error/validation details on rejection
   
 - **Get Session Telemetry:** `GET /api/sessions/{sessionId}/telemetry`
   - Returns: Diagnostic snapshot including sequence state and message buffer (Phase 1)
 
-See `src/SquadScout.Broker/Program.cs` for endpoint implementations.
+See `src/SquadScout.Broker/Program.cs` for endpoint implementations. Mobile project list, session start, session status, live input, replay recovery, and broker output all run over Azure Web PubSub. The broker-owned HTTP endpoints remain for local admin/testing and for Azure Web PubSub upstream webhooks only.
 
 ### WebSocket Support (Phase 2)
 
-**Phase 1 Status:** No WebSocket endpoints are implemented. Session output routing currently uses Azure Web PubSub publish for remote clients. Local clients poll session state or subscribe via Web PubSub client connections. Direct broker WebSocket support is deferred to Phase 2.
+**Phase 1 Status:** No broker-owned client-facing HTTP WebSocket endpoints are implemented. Mobile broker control requests, live input, replay recovery, and broker output all ride Azure Web PubSub. The broker only exposes `/api/upstream` for Azure Web PubSub webhook delivery plus local admin/testing REST APIs.
 
 ## Project Registration
 

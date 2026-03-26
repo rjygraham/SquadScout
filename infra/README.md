@@ -7,7 +7,7 @@ This directory contains Bicep infrastructure-as-code templates for deploying Squ
 The following resources are deployed:
 
 - **Azure Web PubSub** - Real-time client connectivity and message relay
-- **Azure Functions** - Token negotiation and upstream event handling
+- **Azure Functions** - Mobile authentication and Web PubSub token minting
 - **Application Insights** - Telemetry and observability
 - **Log Analytics Workspace** - Log aggregation backend
 - **Storage Account** - Functions runtime storage
@@ -91,30 +91,30 @@ The Bicep deployment automatically configures required Function app settings. Fo
   "Values": {
     "Functions__WebPubSubEndpoint": "<from WEBPUBSUB_ENDPOINT output>",
     "Functions__WebPubSubHub": "squadscout",
-    "Functions__BrokerBaseUrl": "http://127.0.0.1:5071"
+    "Functions__TokenLifetimeMinutes": "60"
   }
 }
 ```
 
 ### Configuring Web PubSub Event Handlers
 
-After infrastructure deployment, configure the Web PubSub hub to route upstream events to the Function:
+After infrastructure deployment, configure the Web PubSub hub to route live session events directly to the broker:
 
 ```bash
-# Get Function App hostname
-FUNCTION_HOST=$(az functionapp show -g rg-<env> -n func-<token> --query defaultHostName -o tsv)
+# Resolve the public broker hostname
+BROKER_HOST=<broker-hostname>
 
 # Configure upstream handler
 az webpubsub hub update \
   -g rg-<env> \
   -n wps-<token> \
   --hub-name squadscout \
-  --event-handler url-template="https://${FUNCTION_HOST}/api/upstream" \
-    user-event-pattern="input" \
+  --event-handler url-template="https://${BROKER_HOST}/api/upstream" \
+    user-event-pattern="session-*" \
     system-events="connect" "connected" "disconnected"
 ```
 
-> **Note:** This step is not automated in Phase 1 Bicep to keep the IaC focused on resource provisioning. Future iterations may include a deployment script.
+> **Note:** The broker validates upstream requests using the Azure Web PubSub connection string's endpoint/access key and optional `AzureWebPubSub:TrustedUpstreamPrincipalIds` allow-list. This step is not automated in Phase 1 Bicep to keep the IaC focused on resource provisioning. Future iterations may include a deployment script.
 
 ## Cost Considerations
 

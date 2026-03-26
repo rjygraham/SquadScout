@@ -5,10 +5,7 @@
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
     "Functions__WebPubSubEndpoint": "https://your-service.webpubsub.azure.com",
     "Functions__WebPubSubHub": "squadscout",
-    "Functions__WebPubSubUpstreamAccessKeys__0": "<web-pubsub-primary-or-secondary-access-key>",
-    "Functions__BrokerBaseUrl": "http://127.0.0.1:5071",
     "Functions__TokenLifetimeMinutes": "60",
-    "Functions__TrustedUpstreamPrincipalIds__0": "<web-pubsub-managed-identity-object-id>",
     "Functions__EnableLocalDevelopmentIdentity": "true",
     "Functions__DevelopmentUserId": "local-dev",
     "Functions__DevelopmentUserDisplayName": "Local Developer"

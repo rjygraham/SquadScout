@@ -120,6 +120,7 @@ public sealed class PubSubConnectionServiceTests
 
         using (var replayCommand = JsonDocument.Parse(socket.SentTexts[1]))
         {
+            Assert.Equal(SessionUpstreamEventNames.ReplayRequest, replayCommand.RootElement.GetProperty("event").GetString());
             var replayRequest = replayCommand.RootElement.GetProperty("data")
                 .Deserialize<MessageEnvelope<ReplayRequestPayload>>(SessionMessageSerializer.DefaultOptions);
 
@@ -207,6 +208,7 @@ public sealed class PubSubConnectionServiceTests
         Assert.Equal(2, negotiationClient.CallCount);
 
         using var replayCommand = JsonDocument.Parse(secondSocket.SentTexts[1]);
+        Assert.Equal(SessionUpstreamEventNames.ReplayRequest, replayCommand.RootElement.GetProperty("event").GetString());
         var replayRequest = replayCommand.RootElement.GetProperty("data")
             .Deserialize<MessageEnvelope<ReplayRequestPayload>>(SessionMessageSerializer.DefaultOptions);
 
@@ -383,6 +385,7 @@ public sealed class PubSubConnectionServiceTests
                 traffic.Envelope.MessageType == SessionMessageType.ReplayRequest));
 
         using var replayCommand = JsonDocument.Parse(socket.SentTexts[1]);
+        Assert.Equal(SessionUpstreamEventNames.ReplayRequest, replayCommand.RootElement.GetProperty("event").GetString());
         var replayRequest = replayCommand.RootElement.GetProperty("data")
             .Deserialize<MessageEnvelope<ReplayRequestPayload>>(SessionMessageSerializer.DefaultOptions);
 

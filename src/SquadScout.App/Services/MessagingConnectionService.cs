@@ -1157,7 +1157,8 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
     private static string ResolveUpstreamEventName(SessionMessageType messageType) =>
         messageType switch
         {
-            SessionMessageType.Input or SessionMessageType.ReplayRequest => SessionUpstreamEventNames.Input,
+            SessionMessageType.Input => SessionUpstreamEventNames.Input,
+            SessionMessageType.ReplayRequest => SessionUpstreamEventNames.ReplayRequest,
             _ => throw new ArgumentOutOfRangeException(
                 nameof(messageType),
                 messageType,

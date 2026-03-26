@@ -24,6 +24,8 @@ All services start; dashboard at `http://localhost:18888`.
 
 ## First Steps
 
+> Mobile clients use Azure Web PubSub for broker control, live input, replay recovery, and output streaming. The REST endpoints below remain for local admin/testing; the Azure Function only handles authentication and token negotiation.
+
 ### 1. Verify Broker is Running
 
 ```bash
@@ -64,5 +66,5 @@ See **[BROKER_SETUP.md](./BROKER_SETUP.md)** for detailed configuration, environ
 ## What's Next?
 
 - Review session lifecycle in the broker [Sessions guide](../src/SquadScout.Broker/Sessions/README.md) (if available).
-- Enable Azure Web PubSub for remote client routing.
+- Enable Azure Web PubSub for remote mobile routing and broker control messaging.
 - Run tests: `dotnet test SquadScout.slnx`.

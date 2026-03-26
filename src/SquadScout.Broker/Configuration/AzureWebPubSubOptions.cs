@@ -7,4 +7,6 @@ public sealed class AzureWebPubSubOptions
     public string Hub { get; set; } = "squadscout";
 
     public string? ConnectionString { get; set; }
+
+    public string[] TrustedUpstreamPrincipalIds { get; set; } = [];
 }
