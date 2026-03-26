@@ -60,3 +60,39 @@
 - PR squash-merged to main; remote/local issue branch deleted; local checkout fast-forwarded to merged main.
 - Scribe orchestration duties completed per charter: logging, decision merging, history synchronization.
 
+### PR #70 Merge Session Logging & Decision Consolidation (2026-03-26)
+
+**Scribe Charter Execution:**
+
+1. **Orchestration Logs Written:**
+   - 2026-03-26T22-00-00Z-neo.md — Review gate approval verdict for PR #70
+   - 2026-03-26T22-00-00Z-morpheus.md — Security & resilience review approval for PR #70
+   - 2026-03-26T22-00-00Z-switch.md — Review gate initiated (continued beyond merge decision)
+
+2. **Session Log Written:**
+   - 2026-03-26T22-00-00Z-pr70-merge.md — PR #70 merge outcome (squash, worktree deleted, branch deleted, main fast-forwarded to ecb68b6)
+
+3. **Decision Inbox Processed:**
+   - Merged 7 decision inbox entries into `.squad/decisions.md`:
+     - copilot-directive-20260326T013424Z.md (Web PubSub as primary control surface)
+     - link-issue-59.md (Working directory documentation strategy)
+     - link-issue-63-doc-location.md (Documentation location strategy)
+     - neo-issue-63-accuracy-pass.md (Documentation accuracy pass)
+     - seraph-issue-58.md (Web PubSub message contract cost optimization)
+     - switch-issue-63-final-review.md (Documentation review verdict)
+     - switch-issue-63-validation.md (Documentation validation bar)
+   - Deleted merged inbox files to keep inbox tidy
+
+4. **Cross-Agent History Updates:**
+   - Neo: Appended PR #70 review gate approval summary
+   - Morpheus: Appended PR #70 security & resilience review summary
+   - Switch: Appended PR #70 review gate initiated note
+   - Scribe: This entry (current logging session)
+
+5. **Decisions Consolidated:**
+   - Added user directive on Web PubSub control surface
+   - Added 5 issues (59, 63, 58) with full context from link, neo, switch, seraph
+   - Added PR #70 merge outcome with review verdicts and next steps
+
+**Status:** All Scribe charter tasks completed. Team memory updated with PR #70 merge context. Decisions inbox tidy (only .gitkeep remains).
+

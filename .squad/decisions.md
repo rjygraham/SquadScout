@@ -647,6 +647,262 @@ If mobile UX later needs a visible "stopping" phase, add that as a separate cont
 - **Branch:** \squad/13-broker-session-start-stop-endpoints\
 - **Ready-for-approval:** (1) Serialize stop and input acceptance; (2) Return structured lifecycle conflict for stop-in-flight input rejection; (3) Add focused test coverage for concurrent stop/input scenarios.
 
+---
+
+## User Directive: Web PubSub as Primary Control Surface (2026-03-26T01:34:24Z)
+
+**Owner:** Ryan Graham (via Copilot)
+
+**Directive:** The Azure Function should only authenticate the mobile client and mint the Azure Web PubSub token. All mobile client ↔ local broker communications (project lists, session start, etc.) must flow over Azure Web PubSub.
+
+**Rationale:** User request — captured for team memory.
+
+**Status:** Recorded. Informs Phase 1 and Phase 2 architecture decisions.
+
+---
+
+## Decision: Issue #59 — Working Directory Documentation Strategy (2026-03-26)
+
+**Owner:** Link  
+**Issue:** #59  
+**Status:** Completed
+
+### Context
+
+Issue #59 initially appeared to request new functionality for per-project working directories. Investigation revealed the functionality already existed and worked correctly. Each session uses its project's RepositoryRoot as the working directory (implemented in `InMemorySessionRelay.CreateStartRequest` line 240).
+
+The real issue was **implicit behavior** — the resolution logic was not documented and the runtime logs did not show which source was being used.
+
+### Decision
+
+Treat this as a **documentation and observability enhancement** rather than a feature implementation:
+
+1. **Documentation First**: Add comprehensive XML documentation to `CopilotPtyHostOptions.WorkingDirectory` explaining it is a fallback-only value
+2. **Runtime Visibility**: Add Information-level logging showing the source of the working directory for each session
+3. **Configuration Clarity**: Add JSON comments to appsettings.json explaining resolution priority
+
+### Rationale
+
+- **Behavior was correct**: The existing implementation properly resolves working directory with the right priority
+- **Observability was lacking**: Operators could not easily understand which directory was being used
+- **Future-proofing**: Clear documentation prevents confusion when developers read the configuration
+
+### Resolution Priority Documented
+
+1. Project RepositoryRoot (from project registration)
+2. CopilotPtyHostOptions.WorkingDirectory (fallback configuration)
+3. Environment.CurrentDirectory (broker process directory)
+
+### Validation
+
+- Build: ✅ Succeeded
+- Tests: ✅ All 126 tests passed
+- Behavior: ✅ Unchanged — zero functional changes
+- Coverage: ✅ Existing directory validation and repository root checks remain intact
+
+### Key Learning
+
+**Distinguish enhancement from implementation**: Always verify whether functionality exists before planning implementation. Implicit behavior can still need documentation and logging improvements.
+
+---
+
+## Decision: Issue #63 — Documentation Location Strategy (2026-03-26)
+
+**Owner:** Link  
+**Issue:** #63  
+**Status:** Completed
+
+### Decision
+
+Place the detailed broker runbook at `docs\broker-local-development.md` and add a minimal root `README.md` that links directly to it.
+
+### Rationale
+
+- The detailed runbook belongs in a stable docs path instead of hidden team metadata.
+- A small root README makes the guide discoverable from the repository landing page without forcing a large repo-overview rewrite.
+- This keeps broker-specific operational detail in one focused document while leaving room for future contributor guides under `docs\`.
+
+---
+
+## Decision: Issue #63 — Documentation Accuracy Pass (2026-03-26)
+
+**Owner:** Neo  
+**Issue:** #63  
+**PR:** #68  
+**Status:** Completed
+
+### Approved
+
+Phase 1 documentation must match actual implementation, not planned features.
+
+### Corrections Applied
+
+**Endpoint Path Fixes:**
+- Added `/api` prefix to all endpoint paths
+- Corrected session endpoints from `/sessions/{projectId}/...` to `/api/sessions` (POST start) and `/api/sessions/{sessionId}/...`
+- Removed `GET /projects/{projectId}` (not implemented)
+- Added `GET /api/sessions/{sessionId}/telemetry` (Phase 1 diagnostics endpoint)
+
+**Contract Field Fixes:**
+- Changed `workingDirectory` → `repositoryRoot` (matches RegisteredProject contract)
+- Documented `StartSessionCommand`: `ProjectId`, `RequestedBy`, `Arguments`
+- Documented `StopSessionCommand`: `ProjectId`, `RequestedBy`, `Reason`
+
+**Unimplemented Feature Claims:**
+- Removed "WebSocket APIs" from broker overview
+- Removed `GET /ws/sessions/{sessionId}` endpoint claim
+- Added "WebSocket Support (Phase 2)" section
+- Clarified `/alive` endpoint is Development environment only
+- Noted WorkingDirectory resolves to repo root at session start
+
+### Validation
+
+- All 92 broker tests pass
+- Broker builds successfully
+- Reviewed against Program.cs, appsettings.json, and contract definitions
+
+---
+
+## Decision: Issue #63 — Documentation Review Verdict (2026-03-25)
+
+**Owner:** Switch  
+**Issue:** #63  
+**PR:** #68  
+**Status:** APPROVED
+
+### Verdict
+
+APPROVED. The #63 docs branch comprehensively covers local broker configuration, standalone vs. AppHost run paths, optional Azure Web PubSub setup, troubleshooting, and implementation status. All test suites pass. Documentation is **factually accurate**, reflects Phase 1 constraints, and provides clear onboarding paths.
+
+### Validation Checklist
+
+- ✅ Local Broker Configuration — Complete coverage of all `appsettings.json` sections
+- ✅ Standalone vs. AppHost Run Paths — Clear comparison table with use cases
+- ✅ Optional Azure Web PubSub Setup — Detailed conditional registration section
+- ✅ Troubleshooting — Comprehensive section with root causes and solutions
+- ✅ Known Phase 1 Limitations — All 6 Phase 1 limits clearly listed
+
+### Minor Gaps (Non-Blocking)
+
+- **Service Discovery Pattern (Aspire):** No guidance on how Functions and MAUI discover broker via Aspire service references. Low impact for Phase 1; defer to Phase 2 multi-service scaling.
+- **WebSocket Support:** Clearly deferred to Phase 2. Accurate documentation, no overpromise.
+
+### Recommendation
+
+APPROVED for merge. The docs are production-ready for Phase 1. No blocking concerns.
+
+---
+
+## Decision: Issue #63 — Documentation Validation Bar (2026-03-26)
+
+**Owner:** Switch  
+**Issue:** #63  
+**Status:** Completed
+
+### Decision
+
+For issue #63, the docs-only validation bar should be:
+
+1. **Solution build:** `dotnet build .\SquadScout.slnx -nologo`
+2. **Focused broker/runtime tests:** `CopilotPtyHostTests`, `SessionRelayPipelineTests`, and `BrokerPhase1DatapathGateTests`
+3. **Manual startup smoke:** prove the documented standalone broker command actually starts and serves `/health`
+4. **Optional-flow verification:** if the docs describe Functions or AppHost, verify those instructions against checked-in config
+
+### Required Contributor-Guide Topics
+
+The guide must include:
+
+- **SDK prerequisite:** `.NET 10.0.200-preview.0.26103.119` from `global.json`
+- **Broker port reality:** launch-profile run (`localhost:5050`) versus no-launch-profile run (`127.0.0.1:5071`)
+- **Default local-only path:** empty `AzureWebPubSub:ConnectionString` is valid and results in no relay publishing
+- **Project registration before sessions:** `POST /api/projects` must happen before `POST /api/sessions`
+- **Repository-root troubleshooting:** missing or nonexistent project roots cause start failures
+- **Copilot CLI prerequisite:** default `CopilotPty:ExecutablePath` is `copilot`, so missing CLI installs surface as PTY startup failures
+- **Working-directory precedence:** project `RepositoryRoot` → `CopilotPty.WorkingDirectory` → broker process directory
+- **Current non-features:** no persisted project registry yet, no working local admin UI yet, Orleans state still reserved
+- **Optional Functions/Azure path:** `Functions:WebPubSubEndpoint` and Azure Functions Core Tools required
+- **AppHost caveat:** AppHost exists, but checked-in settings do not currently prove a fully working end-to-end flow
+
+---
+
+## Decision: Issue #58 — Web PubSub Message Contract Cost Optimization (2026-03-26)
+
+**Owner:** Seraph  
+**Issue:** #58  
+**PR:** #61  
+**Status:** Completed
+
+### Decision
+
+Optimize Web PubSub message contract serialization to reduce outbound message costs by 7-10% through backward-compatible format changes.
+
+### Context
+
+Azure Web PubSub bills by quantity of messages sent outbound. Smaller messages directly reduce operational costs. Phase 1 cost optimization was identified as a first-class concern for production viability.
+
+### Implementation
+
+**1. Numeric Enum Serialization (2-5% reduction)**
+- Enums now serialize as numbers instead of strings
+- Example: `"messageType": 5` instead of `"messageType": "heartbeat"`
+- Custom `NumberWithStringFallbackEnumConverterFactory` accepts both formats during deserialization
+
+**2. Unix Timestamp Format (2-3% reduction)**
+- Timestamps serialize as Unix milliseconds instead of ISO8601/RFC3339
+- Example: `1774375200000` (13 chars) vs `"2026-03-24T18:00:00+00:00"` (25 chars)
+- `UnixMillisecondsDateTimeOffsetJsonConverter` accepts both formats
+
+**3. GUID Compression (NOT IMPLEMENTED)**
+- Evaluated Base64url GUID compression (36 chars → 22 chars)
+- Decision: Not implemented because this codebase uses string-prefixed IDs
+
+### Impact
+
+- **Heartbeat messages:** ~280-290 bytes (down from ~320-330 bytes)
+- **Typical output:** ~510-540 bytes (down from ~580-620 bytes)
+- **Combined reduction:** 7-10% per message
+- **Zero breaking changes:** Backward-compatible dual-format deserialization
+
+### Testing
+
+All 129 tests pass including new backward compatibility tests.
+
+---
+
+## PR #70 Merge: Web PubSub Control Operations (2026-03-26)
+
+**PR:** #70 — "Phase 1: move broker control operations onto Web PubSub"  
+**Issue:** #69  
+**Commit:** `ecb68b6`  
+**Status:** Merged
+
+### Overview
+
+Issue #69 has been landed. The work implements Web PubSub-based control operations for the broker, moving session start/stop commands from HTTP-only to full support over the PubSub channel. This unifies the transport surface and enables the MAUI client to orchestrate sessions via the same connection used for session I/O.
+
+### Review Verdicts
+
+- **Neo:** Approved. No longer draft-worthy; ready for merge.
+- **Morpheus:** Security and resilience review approved with non-blocking advisories.
+- **Switch:** Review gate initiated but continued running beyond merge decision.
+
+### Merge Outcome
+
+- **Method:** Squash merge
+- **Worktree:** Removed (D:\GitHub\SquadScout-69 deleted)
+- **Local branch:** Deleted
+- **Local main:** Fast-forwarded to ecb68b6
+
+### Key Changes
+
+Session control operations (StartSessionCommand, StopSessionCommand) now routable over Web PubSub in addition to HTTP. Broker relay publisher handles command validation and session state transitions.
+
+### Next Steps
+
+- Issue #69 complete; backlog progressed
+- Issue #17 telemetry and replay diagnostics remains the active focus
+- Phase 2 multi-project UI and Orleans integration can proceed independently
+
 
 ## Decision: Aspire / ServiceDefaults Revision — Link Implementation (2026-03-25)
 

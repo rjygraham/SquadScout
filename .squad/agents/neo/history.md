@@ -188,3 +188,14 @@
 - **Commits:** 1bab898 (Link's initial docs), 1d364bf (Neo's accuracy pass).
 - **PR:** #68 (already open, closes #63).
 - **Key learning:** Phase 1 docs must match actual implementation, not planned features. Unimplemented behavior should be explicitly labeled as "Phase 2" or removed. Field names must match contract definitions exactly.
+
+### 2026-03-26 — PR #70 Review Gate: Web PubSub Control Operations
+
+- **Issue:** #69 — "Phase 1: move broker control operations onto Web PubSub"
+- **PR:** #70 (Coordinator: Merged with squash, commit `ecb68b6`)
+- **Verdict:** APPROVED — No longer draft-worthy; ready for merge.
+- **Assessment:** Build green (0 warnings), all Phase 1 datapath tests passing. Control operations successfully decoupled from HTTP-only model. Relay publisher pattern consistent with session I/O routing.
+- **Outcome:** PR merged cleanly. Worktree removed (D:\GitHub\SquadScout-69 deleted). Local branch deleted. Local main fast-forwarded to ecb68b6.
+- **Key decision:** Session control operations (StartSessionCommand, StopSessionCommand) now routable over Web PubSub in addition to HTTP. Broker relay publisher handles command validation and session state transitions.
+- **Next phase:** Issue #69 complete. Issue #17 telemetry and replay diagnostics remains the active focus (Phase 1 gate). Phase 2 multi-project UI and Orleans integration can proceed independently.
+- **Orchestration log:** 2026-03-26T22-00-00Z-neo.md (review verdict).

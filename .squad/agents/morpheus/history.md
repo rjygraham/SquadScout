@@ -323,3 +323,21 @@
 - **All acceptance criteria verified:** Sequence/replay context ✅ | Stable correlation IDs ✅ | Secret-safe output ✅ | Minimal Phase 1 scope ✅ | Test coverage 87 broker + 31 app ✅.
 - **Pre-existing non-blocking issues documented:** Token refresh flakiness (timing), client gap-detected silently dropped (Phase 2), client generation accepts backward movement (Phase 2).
 - **Cross-team sign-off:** Neo (landing), Switch (acceptance), Link (diagnostics contract), Scribe (decision consolidation). Broker tests 87/87 ✅. Full regression 122/122 ✅. Hardening included in feature branch. Ready for merge.
+
+### 2026-03-26 — PR #70 Review: Web PubSub Control Operations (Security & Resilience)
+
+- **Issue:** #69 — "Phase 1: move broker control operations onto Web PubSub"
+- **PR:** #70 (Coordinator: Merged with squash, commit `ecb68b6`)
+- **Verdict:** APPROVED with non-blocking advisories
+- **Security Assessment:** PR #70 routes StartSessionCommand and StopSessionCommand over Web PubSub with the same trust boundaries as HTTP control paths.
+- **Findings:**
+  - Upstream validation on control messages enforced ✅
+  - Session group isolation verified for PubSub-routed commands ✅
+  - No new attack surface introduced ✅
+  - Secrets logging behavior unchanged (control payloads redacted per Phase 1 baseline) ✅
+- **Resilience Notes (Non-blocking advisories):**
+  - Control operation timeouts on PubSub maintain same semantics as HTTP. No regression.
+  - Connection loss during stop-command results in graceful session cleanup (design intent verified).
+  - Reconnect-after-control-op flows tested; no state corruption paths identified.
+- **Outcome:** PR merged cleanly. No blocking security concerns. Issue #69 complete.
+- **Orchestration log:** 2026-03-26T22-00-00Z-morpheus.md (security review verdict).

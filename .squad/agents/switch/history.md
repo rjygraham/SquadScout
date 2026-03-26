@@ -500,3 +500,12 @@
 - **Cross-team coordination:** Neo (landing execution), Link (diagnostics contract), Morpheus (hardening + security review), Scribe (decision consolidation). All sign-offs in place.
 - **Next:** Orchestration log recorded (2026-03-25T21-41-50Z-switch.md). Session log: 2026-03-25T21-41-50Z-issue-17-landing.md. Ready to merge PR #57 on Lead approval.
 
+### 2026-03-26 — PR #70 Review Gate: Web PubSub Control Operations (Initiated)
+
+- **Issue:** #69 — "Phase 1: move broker control operations onto Web PubSub"
+- **PR:** #70 (Coordinator: Merged with squash, commit `ecb68b6`)
+- **Status:** Review gate initiated but continued running beyond merge decision
+- **Note:** Neo and Morpheus review verdicts completed and approved. Coordinator merged PR with squash, removed worktree (D:\GitHub\SquadScout-69 deleted), deleted local branch, fast-forwarded local main to ecb68b6.
+- **Switch status:** Ongoing review activity did not gate the completed merge. PR #70 merged cleanly.
+- **Orchestration log:** 2026-03-26T22-00-00Z-switch.md (review gate continued).
+
