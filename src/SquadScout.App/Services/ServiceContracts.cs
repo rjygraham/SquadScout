@@ -62,6 +62,8 @@ public sealed record MessageConnectionStatus
 
     public int ReconnectAttempt { get; init; }
 
+    public int RefreshAttempt { get; init; }
+
     public string? FailureReason { get; init; }
 
     public long Generation { get; init; } = SessionEnvelopeContract.InitialGeneration;

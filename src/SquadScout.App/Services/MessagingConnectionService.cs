@@ -1217,6 +1217,22 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
         }
     }
 
+    private PubSubNegotiateResponse? GetNegotiation()
+    {
+        lock (_stateSync)
+        {
+            return _negotiation;
+        }
+    }
+
+    private bool HasConnectedTransport()
+    {
+        lock (_stateSync)
+        {
+            return _socket is not null && _currentStatus.State == MessageConnectionState.Connected;
+        }
+    }
+
     private bool IsCurrentSession(SessionDescriptor session)
     {
         lock (_stateSync)
@@ -1313,46 +1329,110 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
 
     private async Task RefreshTokenAsync(CancellationToken cancellationToken)
     {
-        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        var retryCount = Math.Max(0, _messagingOptions.TokenRefreshRetryCount);
+        for (var attempt = 1; ; attempt++)
         {
-            var session = GetActiveSession();
-            if (session is null || CurrentStatus.State != MessageConnectionState.Connected)
-            {
-                return;
-            }
+            SessionDescriptor? session = null;
+            PubSubNegotiateResponse? activeNegotiation = null;
 
             try
             {
-                var negotiation = await _negotiationClient.NegotiateAsync(session, CancellationToken.None).ConfigureAwait(false);
-                await ConnectCoreAsync(
-                        isReconnect: true,
-                        reconnectAttempt: CurrentStatus.ReconnectAttempt,
-                        CancellationToken.None,
-                        negotiationOverride: negotiation,
-                        publishTransitionStatus: false,
-                        failureReasonPrefix: "Token refresh failed. Retry the live transport after confirming the broker negotiate endpoint is reachable.")
-                    .ConfigureAwait(false);
+                await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    session = GetActiveSession();
+                    activeNegotiation = GetNegotiation();
+                    if (session is null || activeNegotiation is null)
+                    {
+                        return;
+                    }
+
+                    if (attempt == 1 && CurrentStatus.State != MessageConnectionState.Connected)
+                    {
+                        return;
+                    }
+
+                    if (attempt > 1 && CurrentStatus.State == MessageConnectionState.Disconnected)
+                    {
+                        return;
+                    }
+
+                    var negotiation = await _negotiationClient.NegotiateAsync(session, cancellationToken).ConfigureAwait(false);
+                    ValidateRefreshedNegotiation(session, activeNegotiation, negotiation);
+
+                    var status = await ConnectCoreAsync(
+                            isReconnect: true,
+                            reconnectAttempt: CurrentStatus.ReconnectAttempt,
+                            CancellationToken.None,
+                            negotiationOverride: negotiation,
+                            publishTransitionStatus: false,
+                            failureReasonPrefix: "Token refresh failed. Retry the live transport after confirming the broker negotiate endpoint is reachable.")
+                        .ConfigureAwait(false);
+
+                    if (status.State == MessageConnectionState.Connected)
+                    {
+                        return;
+                    }
+
+                    throw new InvalidOperationException(status.FailureReason ?? status.Summary);
+                }
+                finally
+                {
+                    _operationGate.Release();
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 return;
             }
+            catch (TokenRefreshAuthDriftException driftException)
+            {
+                session ??= GetActiveSession();
+                if (session is null)
+                {
+                    return;
+                }
+
+                await FailTokenRefreshAsync(
+                        session,
+                        ComposeFailureReason(
+                            "Token refresh detected authentication drift. Retry the live transport after confirming the active account still owns this session.",
+                            driftException.Message))
+                    .ConfigureAwait(false);
+                return;
+            }
             catch (Exception ex)
             {
-                await CleanupTransportAsync(CancellationToken.None).ConfigureAwait(false);
-                PublishStatus(
-                    CreateFaultedStatus(
-                        session,
-                        CurrentStatus.ReconnectAttempt,
-                        ComposeFailureReason(
-                            "Token refresh failed. Retry the live transport after confirming the broker negotiate endpoint is reachable.",
-                            ex.Message)));
+                session ??= GetActiveSession();
+                activeNegotiation ??= GetNegotiation();
+                if (session is null || activeNegotiation is null)
+                {
+                    return;
+                }
+
+                if (attempt > retryCount)
+                {
+                    await FailTokenRefreshAsync(
+                            session,
+                            ComposeFailureReason(
+                                $"Token refresh failed after {attempt} attempt{(attempt == 1 ? string.Empty : "s")}. Retry the live transport after confirming the broker negotiate endpoint is reachable.",
+                                ex.Message))
+                        .ConfigureAwait(false);
+                    return;
+                }
+
+                var retryDelay = CalculateRefreshRetryDelay(activeNegotiation.ExpiresAtUtc, attempt);
+                PublishStatus(CreateTokenRefreshRetryStatus(session, activeNegotiation, attempt, retryDelay, ex.Message));
+
+                try
+                {
+                    await _delayAsync(retryDelay, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
             }
-        }
-        finally
-        {
-            _operationGate.Release();
         }
     }
 
@@ -1364,16 +1444,71 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             return TimeSpan.Zero;
         }
 
-        var fiveMinuteDelay = remaining - TokenRefreshLeadTime;
-        if (fiveMinuteDelay <= TimeSpan.Zero)
+        return remaining;
+    }
+
+    private TimeSpan CalculateRefreshRetryDelay(DateTimeOffset expiresAtUtc, int failedAttempt)
+    {
+        var baseDelaySeconds = Math.Max(1, _messagingOptions.TokenRefreshRetryBaseDelaySeconds);
+        var maxDelaySeconds = Math.Max(baseDelaySeconds, _messagingOptions.TokenRefreshRetryMaxDelaySeconds);
+        var multiplier = Math.Pow(2d, Math.Max(0, failedAttempt - 1));
+        var proposedDelay = TimeSpan.FromSeconds(Math.Min(maxDelaySeconds, baseDelaySeconds * multiplier));
+        if (expiresAtUtc == default)
+        {
+            return proposedDelay;
+        }
+
+        var remainingLifetime = expiresAtUtc - _utcNow();
+        if (remainingLifetime <= TimeSpan.FromSeconds(1))
         {
             return TimeSpan.Zero;
         }
 
-        var seventyFivePercentDelay = TimeSpan.FromTicks((long)(remaining.Ticks * 0.75d));
-        return fiveMinuteDelay < seventyFivePercentDelay
-            ? fiveMinuteDelay
-            : seventyFivePercentDelay;
+        var clampedDelay = remainingLifetime - TimeSpan.FromSeconds(1);
+        return proposedDelay <= clampedDelay
+            ? proposedDelay
+            : clampedDelay;
+    }
+
+    private void ValidateRefreshedNegotiation(
+        SessionDescriptor session,
+        PubSubNegotiateResponse currentNegotiation,
+        PubSubNegotiateResponse refreshedNegotiation)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(currentNegotiation);
+        ArgumentNullException.ThrowIfNull(refreshedNegotiation);
+
+        if (!string.Equals(refreshedNegotiation.ProjectId, session.ProjectId, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(refreshedNegotiation.SessionId, session.SessionId, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new TokenRefreshAuthDriftException(
+                $"The negotiate endpoint returned credentials for {refreshedNegotiation.ProjectId}/{refreshedNegotiation.SessionId} instead of {session.ProjectId}/{session.SessionId}.");
+        }
+
+        if (!string.Equals(refreshedNegotiation.SessionGroup, currentNegotiation.SessionGroup, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new TokenRefreshAuthDriftException(
+                $"The negotiate endpoint returned session group '{refreshedNegotiation.SessionGroup}' instead of '{currentNegotiation.SessionGroup}'.");
+        }
+
+        if (!string.Equals(refreshedNegotiation.UserId, currentNegotiation.UserId, StringComparison.Ordinal))
+        {
+            throw new TokenRefreshAuthDriftException(
+                $"The negotiate endpoint returned user '{refreshedNegotiation.UserId}' instead of '{currentNegotiation.UserId}'.");
+        }
+
+        if (!string.Equals(refreshedNegotiation.Hub, currentNegotiation.Hub, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new TokenRefreshAuthDriftException(
+                $"The negotiate endpoint returned hub '{refreshedNegotiation.Hub}' instead of '{currentNegotiation.Hub}'.");
+        }
+    }
+
+    private async Task FailTokenRefreshAsync(SessionDescriptor session, string failureReason)
+    {
+        await CleanupTransportAsync(CancellationToken.None).ConfigureAwait(false);
+        PublishStatus(CreateFaultedStatus(session, CurrentStatus.ReconnectAttempt, failureReason));
     }
 
     private void EnsureHeartbeatMonitorStarted()
@@ -1577,6 +1712,36 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             FailureReason = failureReason
         });
 
+    private MessageConnectionStatus CreateTokenRefreshRetryStatus(
+        SessionDescriptor session,
+        PubSubNegotiateResponse negotiation,
+        int refreshAttempt,
+        TimeSpan retryDelay,
+        string detail)
+    {
+        var transportStillConnected = HasConnectedTransport();
+        var baseStatus = transportStillConnected
+            ? TryCreateConnectedStatus() ?? CurrentStatus
+            : CurrentStatus;
+        var summary = transportStillConnected
+            ? $"Refreshing live messaging for session '{session.SessionId}' hit a transient failure. Retrying in {FormatDelay(retryDelay)} while the current session stream stays connected."
+            : $"Refreshing live messaging for session '{session.SessionId}' lost the active session stream. Rejoining in {FormatDelay(retryDelay)}.";
+
+        return CreateStatusWithOrderingState(baseStatus with
+        {
+            State = transportStillConnected ? MessageConnectionState.Connected : MessageConnectionState.Reconnecting,
+            Summary = summary,
+            ProjectId = session.ProjectId,
+            SessionId = session.SessionId,
+            SessionGroup = negotiation.SessionGroup,
+            RefreshAtUtc = negotiation.RefreshAtUtc,
+            RefreshAttempt = refreshAttempt,
+            FailureReason = detail,
+            ReplayAvailableFromSequence = null,
+            ReplayAvailableToSequence = null
+        });
+    }
+
     private MessageConnectionStatus? TryCreateConnectedStatus()
     {
         lock (_stateSync)
@@ -1746,6 +1911,21 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
             ? detail
             : $"{prefix} {detail}";
 
+    private static string FormatDelay(TimeSpan delay)
+    {
+        if (delay <= TimeSpan.Zero)
+        {
+            return "0 seconds";
+        }
+
+        if (delay.TotalMinutes >= 1d && delay.Seconds == 0)
+        {
+            return $"{Math.Max(1, (int)Math.Round(delay.TotalMinutes, MidpointRounding.AwayFromZero))} minute(s)";
+        }
+
+        return $"{Math.Max(0, (int)Math.Ceiling(delay.TotalSeconds))} second(s)";
+    }
+
     private static MessageEnvelope<JsonElement> ToJsonEnvelope<TPayload>(MessageEnvelope<TPayload> envelope) =>
         new()
         {
@@ -1767,6 +1947,14 @@ public sealed class MessagingConnectionService : IMessageConnectionService, IAsy
                     ? jsonPayload.Clone()
                     : JsonSerializer.SerializeToElement(envelope.Payload, SessionMessageSerializer.DefaultOptions))
         };
+
+    private sealed class TokenRefreshAuthDriftException : InvalidOperationException
+    {
+        public TokenRefreshAuthDriftException(string message)
+            : base(message)
+        {
+        }
+    }
 
     private sealed record WebPubSubJoinGroupCommand
     {

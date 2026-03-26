@@ -86,6 +86,24 @@ public static class AppConfiguration
         {
             options.Messaging.CommandAckTimeoutSeconds = commandAckTimeoutSeconds;
         }
+
+        var tokenRefreshRetryCount = Environment.GetEnvironmentVariable("SQUADSCOUT_MESSAGING__TOKENREFRESHRETRYCOUNT");
+        if (int.TryParse(tokenRefreshRetryCount, out var refreshRetryCount) && refreshRetryCount >= 0)
+        {
+            options.Messaging.TokenRefreshRetryCount = refreshRetryCount;
+        }
+
+        var tokenRefreshRetryBaseDelay = Environment.GetEnvironmentVariable("SQUADSCOUT_MESSAGING__TOKENREFRESHRETRYBASEDELAYSECONDS");
+        if (int.TryParse(tokenRefreshRetryBaseDelay, out var refreshRetryBaseDelaySeconds) && refreshRetryBaseDelaySeconds > 0)
+        {
+            options.Messaging.TokenRefreshRetryBaseDelaySeconds = refreshRetryBaseDelaySeconds;
+        }
+
+        var tokenRefreshRetryMaxDelay = Environment.GetEnvironmentVariable("SQUADSCOUT_MESSAGING__TOKENREFRESHRETRYMAXDELAYSECONDS");
+        if (int.TryParse(tokenRefreshRetryMaxDelay, out var refreshRetryMaxDelaySeconds) && refreshRetryMaxDelaySeconds > 0)
+        {
+            options.Messaging.TokenRefreshRetryMaxDelaySeconds = refreshRetryMaxDelaySeconds;
+        }
     }
 }
 
@@ -146,6 +164,12 @@ public sealed class MessagingOptions
     public int ConnectTimeoutSeconds { get; set; } = 15;
 
     public int CommandAckTimeoutSeconds { get; set; } = 10;
+
+    public int TokenRefreshRetryCount { get; set; } = 4;
+
+    public int TokenRefreshRetryBaseDelaySeconds { get; set; } = 5;
+
+    public int TokenRefreshRetryMaxDelaySeconds { get; set; } = 60;
 
     public int RecentTrafficCapacity { get; set; } = 200;
 }

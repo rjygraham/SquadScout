@@ -696,7 +696,7 @@ public sealed class PubSubConnectionServiceTests
     }
 
     [Fact]
-    public async Task PrepareForSessionAsyncSchedulesTokenRefreshBeforeRefreshAtUtc()
+    public async Task PrepareForSessionAsyncSchedulesTokenRefreshUsingFunctionRefreshWindow()
     {
         var session = CreateSession();
         var now = new DateTimeOffset(2026, 03, 25, 18, 00, 00, TimeSpan.Zero);
@@ -742,7 +742,7 @@ public sealed class PubSubConnectionServiceTests
 
         await service.PrepareForSessionAsync(session);
 
-        Assert.Equal(TimeSpan.FromMinutes(45), Assert.Single(delay.RequestedDelays));
+        Assert.Equal(TimeSpan.FromMinutes(60), Assert.Single(delay.RequestedDelays));
 
         delay.ReleaseNext();
 
@@ -753,7 +753,7 @@ public sealed class PubSubConnectionServiceTests
 
         await WaitForAsync(() => delay.RequestedDelays.Count >= 2);
 
-        Assert.Equal(TimeSpan.FromMinutes(90), delay.RequestedDelays[1]);
+        Assert.Equal(TimeSpan.FromMinutes(120), delay.RequestedDelays[1]);
     }
 
     [Fact]
@@ -823,6 +823,78 @@ public sealed class PubSubConnectionServiceTests
         Assert.NotNull(envelope);
         Assert.Equal(2, envelope!.AcknowledgedSequence);
         Assert.Equal(1, envelope.ClientSequence);
+    }
+
+    [Fact]
+    public async Task TokenRefreshRetriesNegotiateFailuresBeforeRejoiningSession()
+    {
+        var session = CreateSession();
+        var now = new DateTimeOffset(2026, 03, 25, 18, 00, 00, TimeSpan.Zero);
+        var delay = new ControlledDelay();
+        var firstSocket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-refresh-retry-1")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        var secondSocket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-refresh-retry-2")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        var negotiationClient = new ScriptedNegotiationClient(
+            CreateNegotiationResponse(session, refreshAtUtc: now.AddMinutes(10), expiresAtUtc: now.AddMinutes(20)),
+            new InvalidOperationException("Negotiate failed with 503 (ServiceUnavailable)."),
+            new InvalidOperationException("Negotiate failed with 503 (ServiceUnavailable)."),
+            CreateNegotiationResponse(session, refreshAtUtc: now.AddMinutes(30), expiresAtUtc: now.AddMinutes(40)));
+
+        await using var service = CreateService(
+            negotiationClient,
+            () => now,
+            delay.DelayAsync,
+            firstSocket,
+            secondSocket);
+
+        await service.PrepareForSessionAsync(session);
+
+        await WaitForAsync(() => delay.RequestedDelays.Count == 1);
+        delay.ReleaseNext();
+
+        await WaitForAsync(() => delay.RequestedDelays.Count == 2);
+        Assert.Equal(MessageConnectionState.Connected, service.CurrentStatus.State);
+        Assert.Equal(1, service.CurrentStatus.RefreshAttempt);
+        Assert.Contains("Retrying in 5 second", service.CurrentStatus.Summary, StringComparison.OrdinalIgnoreCase);
+
+        delay.ReleaseNext();
+        await WaitForAsync(() => delay.RequestedDelays.Count == 3);
+        Assert.Equal(MessageConnectionState.Connected, service.CurrentStatus.State);
+        Assert.Equal(2, service.CurrentStatus.RefreshAttempt);
+        Assert.Contains("Retrying in 10 second", service.CurrentStatus.Summary, StringComparison.OrdinalIgnoreCase);
+
+        delay.ReleaseNext();
+        await WaitForAsync(() =>
+            negotiationClient.CallCount == 4 &&
+            service.CurrentStatus.State == MessageConnectionState.Connected &&
+            service.CurrentStatus.ConnectionId == "conn-refresh-retry-2");
+
+        Assert.Equal(0, service.CurrentStatus.RefreshAttempt);
     }
 
     [Fact]
@@ -963,7 +1035,7 @@ public sealed class PubSubConnectionServiceTests
     }
 
     [Fact]
-    public async Task TokenRefreshFailureTransitionsToFaultedWithActionableGuidance()
+    public async Task TokenRefreshFailureTransitionsToFaultedAfterConfiguredRetries()
     {
         var session = CreateSession();
         var now = new DateTimeOffset(2026, 03, 25, 18, 00, 00, TimeSpan.Zero);
@@ -982,9 +1054,77 @@ public sealed class PubSubConnectionServiceTests
             }
         };
 
+        var messagingOptions = new MessagingOptions
+        {
+            Hub = "squadscout",
+            NegotiateUrl = "http://127.0.0.1:7071/api/negotiate",
+            ConnectTimeoutSeconds = 5,
+            CommandAckTimeoutSeconds = 5,
+            TokenRefreshRetryCount = 1,
+            TokenRefreshRetryBaseDelaySeconds = 5,
+            TokenRefreshRetryMaxDelaySeconds = 60,
+            RecentTrafficCapacity = 20
+        };
+
         var negotiationClient = new ScriptedNegotiationClient(
-            CreateNegotiationResponse(session, now.AddMinutes(10)),
+            CreateNegotiationResponse(session, refreshAtUtc: now.AddMinutes(10), expiresAtUtc: now.AddMinutes(20)),
+            new InvalidOperationException("Negotiate failed with 401 (Unauthorized). The negotiate endpoint requires a trusted identity."),
             new InvalidOperationException("Negotiate failed with 401 (Unauthorized). The negotiate endpoint requires a trusted identity."));
+
+        await using var service = CreateService(
+            messagingOptions,
+            negotiationClient,
+            () => now,
+            delay.DelayAsync,
+            firstSocket);
+
+        await service.PrepareForSessionAsync(session);
+
+        await WaitForAsync(() => delay.RequestedDelays.Count == 1);
+        delay.ReleaseNext();
+        await WaitForAsync(() => delay.RequestedDelays.Count == 2);
+        Assert.Equal(MessageConnectionState.Connected, service.CurrentStatus.State);
+        Assert.Equal(1, service.CurrentStatus.RefreshAttempt);
+
+        delay.ReleaseNext();
+
+        await WaitForAsync(() => service.CurrentStatus.State == MessageConnectionState.Faulted);
+
+        Assert.Equal(3, negotiationClient.CallCount);
+        Assert.Contains("Token refresh failed", service.CurrentStatus.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Token refresh failed", service.CurrentStatus.FailureReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("after 2 attempts", service.CurrentStatus.FailureReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Retry the live transport", service.CurrentStatus.FailureReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("trusted identity", service.CurrentStatus.FailureReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TokenRefreshAuthDriftFaultsBeforeRejoiningWrongSessionIdentity()
+    {
+        var session = CreateSession();
+        var now = new DateTimeOffset(2026, 03, 25, 18, 00, 00, TimeSpan.Zero);
+        var delay = new ControlledDelay();
+        var firstSocket = new FakeWebPubSubSocket
+        {
+            ConnectFrames =
+            [
+                SystemMessage("connected", connectionId: "conn-auth-drift")
+            ],
+            OnSendAsync = command =>
+            {
+                var json = JsonDocument.Parse(command);
+                var ackId = json.RootElement.GetProperty("ackId").GetInt64();
+                return Task.FromResult<string?>(AckMessage(ackId, success: true));
+            }
+        };
+
+        var negotiationClient = new ScriptedNegotiationClient(
+            CreateNegotiationResponse(session, refreshAtUtc: now.AddMinutes(10), expiresAtUtc: now.AddMinutes(20)),
+            CreateNegotiationResponse(
+                session,
+                refreshAtUtc: now.AddMinutes(30),
+                expiresAtUtc: now.AddMinutes(40),
+                userId: $"client:{session.ProjectId}:{session.SessionId}:other-user"));
 
         await using var service = CreateService(
             negotiationClient,
@@ -999,10 +1139,9 @@ public sealed class PubSubConnectionServiceTests
 
         await WaitForAsync(() => service.CurrentStatus.State == MessageConnectionState.Faulted);
 
-        Assert.Contains("Token refresh failed", service.CurrentStatus.Summary, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Token refresh failed", service.CurrentStatus.FailureReason, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Retry the live transport", service.CurrentStatus.FailureReason, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("trusted identity", service.CurrentStatus.FailureReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("authentication drift", service.CurrentStatus.FailureReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("other-user", service.CurrentStatus.FailureReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(WebSocketState.Closed, firstSocket.State);
     }
 
     [Fact]
@@ -1054,6 +1193,40 @@ public sealed class PubSubConnectionServiceTests
         Assert.Equal("seraph@local", Assert.Single(users));
         Assert.True(capturedRequest.Headers.TryGetValues("x-squadscout-dev-name", out var displayNames));
         Assert.Equal("seraph@local", Assert.Single(displayNames));
+    }
+
+    [Fact]
+    public async Task PubSubNegotiationClientRejectsMismatchedScopedResponses()
+    {
+        using var httpClient = new HttpClient(new DelegateHttpMessageHandler(_ =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(
+                    CreateNegotiationResponse(
+                        CreateSession(),
+                        userId: "client:proj-01:session-other:mobile-user") with
+                    {
+                        SessionId = "session-other"
+                    },
+                    options: SessionMessageSerializer.DefaultOptions)
+            })));
+
+        var client = new PubSubNegotiationClient(
+            httpClient,
+            new MessagingOptions
+            {
+                NegotiateUrl = "http://127.0.0.1:7071/api/negotiate"
+            },
+            new ConfiguredAuthenticationService(new AuthOptions
+            {
+                Mode = "LocalDevelopment",
+                DefaultRequestedBy = "seraph@local"
+            }));
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => client.NegotiateAsync(CreateSession()));
+
+        Assert.Contains("session-other", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("session-abc", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1314,17 +1487,21 @@ public sealed class PubSubConnectionServiceTests
 
     private static PubSubNegotiateResponse CreateNegotiationResponse(
         SessionDescriptor session,
-        DateTimeOffset? refreshAtUtc = null) =>
+        DateTimeOffset? refreshAtUtc = null,
+        DateTimeOffset? expiresAtUtc = null,
+        string? userId = null,
+        string? sessionGroup = null,
+        string? hub = null) =>
         new()
         {
             Url = "wss://example.webpubsub.azure.com/client/hubs/squadscout?access_token=test",
-            Hub = "squadscout",
-            UserId = $"client:{session.ProjectId}:{session.SessionId}:mobile-user",
+            Hub = hub ?? "squadscout",
+            UserId = userId ?? $"client:{session.ProjectId}:{session.SessionId}:mobile-user",
             ProjectId = session.ProjectId,
             SessionId = session.SessionId,
             ParticipantKind = PubSubParticipantKind.Client,
-            SessionGroup = $"session:{session.ProjectId}:{session.SessionId}",
-            ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(1),
+            SessionGroup = sessionGroup ?? $"session:{session.ProjectId}:{session.SessionId}",
+            ExpiresAtUtc = expiresAtUtc ?? DateTimeOffset.UtcNow.AddHours(1),
             RefreshAtUtc = refreshAtUtc ?? DateTimeOffset.UtcNow.AddMinutes(50)
         };
 
