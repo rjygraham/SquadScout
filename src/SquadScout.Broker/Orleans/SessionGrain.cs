@@ -11,7 +11,8 @@ public sealed class SessionGrain : Grain, ISessionGrain
 {
     private readonly IPersistentState<SessionGrainState> _persistentState;
     private readonly int _replayBufferCapacity;
-    private SemaphoreSlim _loadGate = new(1, 1);
+    private readonly object _loadGateSync = new();
+    private LoadGateState _loadGate = new();
     private SessionRuntimeState? _runtime;
     private bool _stateLoaded;
 
@@ -33,9 +34,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
     {
         _runtime = null;
         _stateLoaded = false;
-        var loadGate = _loadGate;
-        _loadGate = new SemaphoreSlim(1, 1);
-        loadGate.Dispose();
+        RetireLoadGate();
         return base.OnDeactivateAsync(reason, cancellationToken);
     }
 
@@ -195,7 +194,8 @@ public sealed class SessionGrain : Grain, ISessionGrain
             return;
         }
 
-        await _loadGate.WaitAsync().ConfigureAwait(true);
+        var loadGate = RentLoadGate();
+        await loadGate.Semaphore.WaitAsync().ConfigureAwait(true);
         try
         {
             if (_stateLoaded)
@@ -213,8 +213,48 @@ public sealed class SessionGrain : Grain, ISessionGrain
         }
         finally
         {
-            _loadGate.Release();
+            loadGate.Semaphore.Release();
+            ReleaseLoadGateLease(loadGate);
         }
+    }
+
+    private LoadGateState RentLoadGate()
+    {
+        lock (_loadGateSync)
+        {
+            _loadGate.LeaseCount++;
+            return _loadGate;
+        }
+    }
+
+    private void RetireLoadGate()
+    {
+        lock (_loadGateSync)
+        {
+            var retiredGate = _loadGate;
+            retiredGate.IsRetired = true;
+            _loadGate = new LoadGateState();
+            TryDisposeRetiredLoadGate(retiredGate);
+        }
+    }
+
+    private void ReleaseLoadGateLease(LoadGateState loadGate)
+    {
+        lock (_loadGateSync)
+        {
+            loadGate.LeaseCount--;
+            TryDisposeRetiredLoadGate(loadGate);
+        }
+    }
+
+    private static void TryDisposeRetiredLoadGate(LoadGateState loadGate)
+    {
+        if (!loadGate.IsRetired || loadGate.LeaseCount != 0)
+        {
+            return;
+        }
+
+        loadGate.Semaphore.Dispose();
     }
 
     private async Task<SessionValidationRecord> ValidateCoreAsync(SessionEnvelopeRecord envelope)
@@ -265,5 +305,14 @@ public sealed class SessionGrain : Grain, ISessionGrain
         {
             throw new ArgumentException("Envelope project id does not match the targeted session.", nameof(envelope));
         }
+    }
+
+    private sealed class LoadGateState
+    {
+        public SemaphoreSlim Semaphore { get; } = new(1, 1);
+
+        public int LeaseCount { get; set; }
+
+        public bool IsRetired { get; set; }
     }
 }
