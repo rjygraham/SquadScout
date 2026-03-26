@@ -2,7 +2,7 @@
 
 ## Overview
 
-The SquadScout Broker is a local .NET host that manages Copilot process I/O via a PTY (pseudo-terminal) interface, orchestrates sessions, and exposes REST and WebSocket APIs for local and remote clients. This guide covers contributor-facing setup and configuration for local development.
+The SquadScout Broker is a local .NET host that manages Copilot process I/O via a PTY (pseudo-terminal) interface, orchestrates sessions, and exposes REST APIs for local and remote clients. This guide covers contributor-facing setup and configuration for local development.
 
 ## Prerequisites
 
@@ -194,14 +194,14 @@ See `src/SquadScout.Broker/Program.cs` for endpoint definitions.
 ### Session APIs
 
 - **Start Session:** `POST /api/sessions`
-  - Request body: `StartSessionCommand` with `ProjectId` and optional configuration
+  - Request body: `StartSessionCommand` with `ProjectId`, `RequestedBy`, and optional `Arguments`
   - Returns: `202 Accepted` with session details
   
 - **Get Session Status:** `GET /api/sessions/{sessionId}`
   - Returns: Session state and metadata
   
 - **Stop Session:** `POST /api/sessions/{sessionId}/stop`
-  - Request body: `StopSessionCommand` with `SessionId`
+  - Request body: `StopSessionCommand` with `ProjectId`, `RequestedBy`, and optional `Reason`
   - Returns: Final session state
   
 - **Send Input:** `POST /api/sessions/{sessionId}/input`
@@ -223,7 +223,7 @@ Projects are registered via REST API. Each project must have:
 
 - **ProjectId:** Unique identifier (e.g., `my-repo-1`)
 - **DisplayName:** Human-readable name
-- **WorkingDirectory:** Path where Copilot executes
+- **RepositoryRoot:** Path to the repository root where Copilot executes
 
 **Example:**
 
@@ -233,7 +233,7 @@ curl -X POST http://127.0.0.1:5071/api/projects \
   -d '{
     "projectId": "squadscout-repo",
     "displayName": "SquadScout Main Repo",
-    "workingDirectory": "D:\\GitHub\\SquadScout"
+    "repositoryRoot": "D:\\GitHub\\SquadScout"
   }'
 ```
 
@@ -273,7 +273,7 @@ curl http://127.0.0.1:5071/health
 # Register a project
 curl -X POST http://127.0.0.1:5071/api/projects \
   -H "Content-Type: application/json" \
-  -d '{"projectId": "test", "displayName": "Test Project", "workingDirectory": "."}'
+  -d '{"projectId": "test", "displayName": "Test Project", "repositoryRoot": "."}'
 
 # List projects
 curl http://127.0.0.1:5071/api/projects

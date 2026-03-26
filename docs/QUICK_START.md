@@ -39,7 +39,7 @@ curl -X POST http://127.0.0.1:5071/api/projects \
   -d '{
     "projectId": "my-project",
     "displayName": "My Project",
-    "workingDirectory": "."
+    "repositoryRoot": "."
   }'
 ```
 
