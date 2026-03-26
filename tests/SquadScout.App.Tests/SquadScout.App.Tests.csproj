@@ -34,6 +34,7 @@
       <Compile Include="..\..\src\SquadScout.App\Services\WebPubSubBrokerControlServices.cs" Link="App\Services\WebPubSubBrokerControlServices.cs" />
       <Compile Include="..\..\src\SquadScout.App\Services\WebPubSubSocketClient.cs" Link="App\Services\WebPubSubSocketClient.cs" />
       <Compile Include="..\..\src\SquadScout.App\Services\MessagingConnectionService.cs" Link="App\Services\MessagingConnectionService.cs" />
+      <Compile Include="..\..\src\SquadScout.App\Services\SessionResumeService.cs" Link="App\Services\SessionResumeService.cs" />
    </ItemGroup>
 
 </Project>

@@ -1,6 +1,8 @@
+using System.Text.Json;
 using SquadScout.App.Configuration;
 using SquadScout.App.Services;
 using SquadScout.App.ViewModels;
+using SquadScout.Contracts.Messages;
 using SquadScout.Contracts.Projects;
 using SquadScout.Contracts.Sessions;
 
@@ -223,10 +225,128 @@ public sealed class ActiveSessionViewModelTests
         Assert.Equal("Draft a message in the native transcript preview.", viewModel.ComposerPlaceholder);
     }
 
+    [Fact]
+    public async Task InitializeAsync_RestoredBrokerSession_RehydratesTranscriptAndRequestsClientRecovery()
+    {
+        var activeState = new ActiveSessionState();
+        var project = CreateProject("squadscout", "SquadScout");
+        var restoredSession = CreateSession("squadscout", "session-restore", SessionState.Running);
+        var resumeService = new RecordingSessionResumeService();
+        resumeService.SetCurrentState(new ActiveSessionResumeState
+        {
+            Snapshot = new ActiveSessionSnapshot(
+                project,
+                restoredSession,
+                SessionActivationSource.Broker,
+                "Recovered session."),
+            Connection = new MessageConnectionResumeState
+            {
+                Generation = 3,
+                AcknowledgedSequence = 7
+            },
+            RecentTraffic =
+            [
+                CreateTraffic(CreateInputEnvelope(project.ProjectId, restoredSession.SessionId, 3, 1, "resume me")),
+                CreateTraffic(CreateOutputEnvelope(project.ProjectId, restoredSession.SessionId, 3, 7, "restored reply"))
+            ]
+        });
+        resumeService.OnRestoreAsync = () =>
+        {
+            activeState.SetActiveSession(
+                project,
+                restoredSession,
+                SessionActivationSource.Broker,
+                "Recovered from device storage.");
+            return Task.CompletedTask;
+        };
+
+        var lifecycle = new RecordingSessionLifecycleService
+        {
+            OnGetAsync = _ => Task.FromResult<SessionDescriptor?>(restoredSession)
+        };
+
+        MessageConnectionResumeState? observedResume = null;
+        var messageConnection = new RecordingMessageConnectionService(new MessageConnectionStatus
+        {
+            State = MessageConnectionState.Disconnected,
+            Summary = "Messaging disconnected.",
+            SupportsLiveSessionStream = true
+        });
+        messageConnection.OnPrepareForSessionAsync = (session, resumeState) =>
+        {
+            observedResume = resumeState;
+            return Task.FromResult(new MessageConnectionStatus
+            {
+                State = MessageConnectionState.Connected,
+                Summary = "Resumed live messaging.",
+                SupportsLiveSessionStream = true,
+                SessionId = session.SessionId,
+                Generation = resumeState?.Generation ?? SessionEnvelopeContract.InitialGeneration,
+                AcknowledgedSequence = resumeState?.AcknowledgedSequence
+            });
+        };
+
+        var viewModel = CreateViewModel(
+            activeSessionState: activeState,
+            connectionService: messageConnection,
+            sessionResumeService: resumeService,
+            sessionLifecycle: lifecycle);
+
+        await viewModel.InitializeAsync();
+
+        Assert.True(viewModel.HasActiveSession);
+        Assert.Equal(1, messageConnection.PrepareForSessionCallCount);
+        Assert.NotNull(observedResume);
+        Assert.Equal(3, observedResume!.Generation);
+        Assert.Equal(7, observedResume.AcknowledgedSequence);
+        Assert.Contains(viewModel.TranscriptMessages, message => message.Text.Contains("resume me", StringComparison.Ordinal));
+        Assert.Contains(viewModel.TranscriptMessages, message => message.Text.Contains("restored reply", StringComparison.Ordinal));
+        Assert.Equal("Resumed live messaging.", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task TrafficObserved_WhenReplayRequestStarts_ShowsResumeRecoveryMessageAndDisablesComposer()
+    {
+        var activeState = new ActiveSessionState();
+        activeState.SetActiveSession(
+            CreateProject("squadscout", "SquadScout"),
+            CreateSession("squadscout", "session-15", SessionState.Running),
+            SessionActivationSource.Broker,
+            "Broker-backed session.");
+
+        var messageConnection = new RecordingMessageConnectionService(new MessageConnectionStatus
+        {
+            State = MessageConnectionState.Connected,
+            Summary = "Connected to session stream.",
+            SupportsLiveSessionStream = true,
+            SessionId = "session-15"
+        });
+
+        var viewModel = CreateViewModel(activeSessionState: activeState, connectionService: messageConnection);
+        await viewModel.InitializeAsync();
+
+        messageConnection.PublishStatus(messageConnection.CurrentStatus with
+        {
+            IsReplayPending = true,
+            ReplayReason = ReplayRequestReason.ClientRecovery,
+            ReplayFromSequenceInclusive = 4,
+            Summary = "Resuming session 'session-15' from this device. Recovering transcript continuity from sequence 4."
+        });
+        messageConnection.PublishTraffic(CreateTraffic(CreateReplayRequestEnvelope("squadscout", "session-15", ReplayRequestReason.ClientRecovery, 4)));
+
+        Assert.False(viewModel.CanSendMessage);
+        Assert.Equal(
+            "Live messaging is recovering transcript continuity. Wait for replay to finish before sending.",
+            viewModel.ComposerPlaceholder);
+        Assert.Contains(viewModel.TranscriptMessages, message => message.Text.Contains("Recovering transcript messages from sequence 4", StringComparison.Ordinal));
+        Assert.Contains(viewModel.StatusBanners, banner => banner.Title == "Resuming saved session");
+    }
+
     private static ActiveSessionViewModel CreateViewModel(
         ActiveSessionState? activeSessionState = null,
         StubAuthenticationService? authenticationService = null,
         RecordingMessageConnectionService? connectionService = null,
+        ISessionResumeService? sessionResumeService = null,
         RecordingNavigator? navigator = null,
         RecordingSessionLifecycleService? sessionLifecycle = null)
     {
@@ -237,6 +357,7 @@ public sealed class ActiveSessionViewModelTests
             sessionLifecycle ?? new RecordingSessionLifecycleService(),
             authenticationService ?? new StubAuthenticationService(new ClientIdentity("ryan", "Ryan Graham", "BrokerNegotiated")),
             connectionService ?? new RecordingMessageConnectionService(),
+            sessionResumeService ?? new RecordingSessionResumeService(),
             navigator ?? new RecordingNavigator());
     }
 
@@ -255,5 +376,102 @@ public sealed class ActiveSessionViewModelTests
             ProjectId = projectId,
             State = state,
             CreatedAtUtc = new DateTimeOffset(2026, 03, 25, 11, 30, 00, TimeSpan.Zero)
+        };
+
+    private static MessageEnvelopeTraffic CreateTraffic<TPayload>(MessageEnvelope<TPayload> envelope) =>
+        new()
+        {
+            Direction = envelope.Direction == MessageDirection.BrokerToClient
+                ? MessageTrafficDirection.Incoming
+                : MessageTrafficDirection.Outgoing,
+            Envelope = ToJsonEnvelope(envelope),
+            Summary = envelope.MessageType.ToString()
+        };
+
+    private static MessageEnvelope<InputChunkPayload> CreateInputEnvelope(
+        string projectId,
+        string sessionId,
+        long generation,
+        long clientSequence,
+        string content) =>
+        new()
+        {
+            ProjectId = projectId,
+            SessionId = sessionId,
+            Generation = generation,
+            MessageType = SessionMessageType.Input,
+            Direction = MessageDirection.ClientToBroker,
+            ClientSequence = clientSequence,
+            TimestampUtc = DateTimeOffset.UtcNow,
+            MessageId = $"client-{clientSequence}",
+            CorrelationId = $"mobile-session:{sessionId}",
+            Payload = new InputChunkPayload
+            {
+                Content = content
+            }
+        };
+
+    private static MessageEnvelope<OutputChunkPayload> CreateOutputEnvelope(
+        string projectId,
+        string sessionId,
+        long generation,
+        long sequence,
+        string content) =>
+        new()
+        {
+            ProjectId = projectId,
+            SessionId = sessionId,
+            Generation = generation,
+            MessageType = SessionMessageType.Output,
+            Direction = MessageDirection.BrokerToClient,
+            Sequence = sequence,
+            TimestampUtc = DateTimeOffset.UtcNow,
+            MessageId = $"broker-{sequence}",
+            CorrelationId = $"broker-session:{sessionId}",
+            Payload = new OutputChunkPayload
+            {
+                Content = content
+            }
+        };
+
+    private static MessageEnvelope<ReplayRequestPayload> CreateReplayRequestEnvelope(
+        string projectId,
+        string sessionId,
+        ReplayRequestReason reason,
+        long fromSequenceInclusive) =>
+        new()
+        {
+            ProjectId = projectId,
+            SessionId = sessionId,
+            Generation = SessionEnvelopeContract.InitialGeneration,
+            MessageType = SessionMessageType.ReplayRequest,
+            Direction = MessageDirection.ClientToBroker,
+            TimestampUtc = DateTimeOffset.UtcNow,
+            MessageId = $"replay-{fromSequenceInclusive}",
+            CorrelationId = $"mobile-session:{sessionId}",
+            Payload = new ReplayRequestPayload
+            {
+                FromSequenceInclusive = fromSequenceInclusive,
+                Reason = reason
+            }
+        };
+
+    private static MessageEnvelope<JsonElement> ToJsonEnvelope<TPayload>(MessageEnvelope<TPayload> envelope) =>
+        new()
+        {
+            ContractVersion = envelope.ContractVersion,
+            ProjectId = envelope.ProjectId,
+            SessionId = envelope.SessionId,
+            Generation = envelope.Generation,
+            MessageType = envelope.MessageType,
+            Direction = envelope.Direction,
+            Sequence = envelope.Sequence,
+            ClientSequence = envelope.ClientSequence,
+            AcknowledgedSequence = envelope.AcknowledgedSequence,
+            TimestampUtc = envelope.TimestampUtc,
+            MessageId = envelope.MessageId,
+            CorrelationId = envelope.CorrelationId,
+            CausationId = envelope.CausationId,
+            Payload = JsonSerializer.SerializeToElement(envelope.Payload, SessionMessageSerializer.DefaultOptions)
         };
 }
