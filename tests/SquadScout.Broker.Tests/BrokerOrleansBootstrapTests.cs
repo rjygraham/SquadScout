@@ -23,6 +23,7 @@ public sealed class BrokerOrleansBootstrapTests
         Assert.False(status!.Enabled);
         Assert.Equal("disabled", status.HostMode);
         Assert.Equal("in-memory", status.SessionStateMode);
+        Assert.Equal("in-memory", status.ProjectStateMode);
         Assert.False(status.SchemaReady);
         Assert.Contains("Phase 1", status.Summary, StringComparison.OrdinalIgnoreCase);
     }
@@ -61,6 +62,7 @@ public sealed class BrokerOrleansBootstrapTests
         Assert.True(snapshot.Enabled);
         Assert.Equal("bootstrap-only", snapshot.HostMode);
         Assert.Equal("in-memory", snapshot.SessionStateMode);
+        Assert.Equal("in-memory", snapshot.ProjectStateMode);
         Assert.True(snapshot.SchemaReady);
         Assert.True(snapshot.SchemaCreatedThisRun);
         Assert.True(snapshot.CompatibilityShimApplied);

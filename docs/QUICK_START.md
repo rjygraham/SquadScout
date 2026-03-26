@@ -51,6 +51,8 @@ curl -X POST http://127.0.0.1:5071/api/projects \
 curl http://127.0.0.1:5071/api/projects
 ```
 
+> If you launch with `Orleans__Enabled=true`, project registrations and session replay metadata persist in the broker's Orleans SQLite store. Live PTY sessions are still broker-owned, so restart active sessions after switching Orleans mode.
+
 ## Troubleshooting Quick Fixes
 
 | Problem | Fix |

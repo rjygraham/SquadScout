@@ -10,6 +10,8 @@ public sealed class OrleansHostStatusSnapshot
 
     public string SessionStateMode { get; init; } = "in-memory";
 
+    public string ProjectStateMode { get; init; } = "in-memory";
+
     public string ClusterId { get; init; } = string.Empty;
 
     public string ServiceId { get; init; } = string.Empty;
@@ -40,6 +42,7 @@ public sealed class OrleansHostStatusSnapshot
             Enabled = false,
             HostMode = "disabled",
             SessionStateMode = "in-memory",
+            ProjectStateMode = "in-memory",
             ClusterId = options.ClusterId,
             ServiceId = options.ServiceId,
             SiloPort = options.SiloPort,
@@ -50,7 +53,7 @@ public sealed class OrleansHostStatusSnapshot
             SchemaCreatedThisRun = false,
             CompatibilityShimApplied = false,
             Summary = "Orleans is disabled. Broker sessions and projects stay on the Phase 1 in-memory path.",
-            Note = "Set Orleans:Enabled=true to start a local silo and bootstrap SQLite without switching session/project ownership yet."
+            Note = "Set Orleans:Enabled=true to move project registrations and session metadata into durable grains. Live PTY ownership remains on the broker runtime path."
         };
 
     public static OrleansHostStatusSnapshot BootstrapOnly(
@@ -62,6 +65,7 @@ public sealed class OrleansHostStatusSnapshot
             Enabled = true,
             HostMode = "bootstrap-only",
             SessionStateMode = "in-memory",
+            ProjectStateMode = "in-memory",
             ClusterId = options.ClusterId,
             ServiceId = options.ServiceId,
             SiloPort = options.SiloPort,
@@ -85,6 +89,7 @@ public sealed class OrleansHostStatusSnapshot
             Enabled = true,
             HostMode = "session-grains",
             SessionStateMode = "durable-grain",
+            ProjectStateMode = "in-memory",
             ClusterId = options.ClusterId,
             ServiceId = options.ServiceId,
             SiloPort = options.SiloPort,
@@ -97,5 +102,29 @@ public sealed class OrleansHostStatusSnapshot
             CompatibilityShimApplied = compatibilityResult.Applied,
             Summary = "Local Orleans silo owns durable session replay state. Project ownership and transport hosting stay on the broker runtime path until the remaining grain migrations land.",
             Note = compatibilityResult.Note
+        };
+
+    public static OrleansHostStatusSnapshot SessionProjectGrains(
+        OrleansHostOptions options,
+        OrleansSchemaBootstrapResult bootstrapResult,
+        OrleansSqliteCompatibilityResult compatibilityResult) =>
+        new()
+        {
+            Enabled = true,
+            HostMode = "session-project-grains",
+            SessionStateMode = "durable-grain",
+            ProjectStateMode = "durable-grain",
+            ClusterId = options.ClusterId,
+            ServiceId = options.ServiceId,
+            SiloPort = options.SiloPort,
+            GatewayPort = options.GatewayPort,
+            StorageProvider = options.StorageProvider,
+            Invariant = bootstrapResult.Invariant,
+            DatabasePath = bootstrapResult.DatabasePath,
+            SchemaReady = bootstrapResult.SchemaReady,
+            SchemaCreatedThisRun = bootstrapResult.SchemaCreatedThisRun,
+            CompatibilityShimApplied = compatibilityResult.Applied,
+            Summary = "Local Orleans silo owns durable session replay state and the project registration catalog. Session grains keep project ids attached to the durable project catalog while PTY transport ownership stays in the broker runtime path.",
+            Note = $"{compatibilityResult.Note} Running PTY sessions are not revived by the durable metadata cutover; drain or restart active sessions before toggling Orleans mode."
         };
 }

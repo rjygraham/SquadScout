@@ -78,7 +78,7 @@ if (orleansOptions.Enabled)
             });
         }
     });
-    orleansStatus = OrleansHostStatusSnapshot.SessionGrains(orleansOptions, bootstrapResult, compatibilityResult);
+    orleansStatus = OrleansHostStatusSnapshot.SessionProjectGrains(orleansOptions, bootstrapResult, compatibilityResult);
 }
 else
 {
@@ -86,7 +86,7 @@ else
 }
 
 builder.Services.AddSingleton(orleansStatus);
-builder.Services.AddSingleton<IProjectCatalog, InMemoryProjectCatalog>();
+builder.Services.AddSingleton<InMemoryProjectCatalog>();
 builder.Services.AddSingleton<IPtyHost, CopilotPtyHost>();
 builder.Services.AddSingleton<PtySessionEnvelopePump>();
 builder.Services.AddSingleton<ISessionGroupResolver, SessionGroupResolver>();
@@ -108,11 +108,19 @@ builder.Services.AddSingleton<ISessionRelay, InMemorySessionRelay>();
 builder.Services.AddSingleton<ISequenceValidator, SessionSequenceValidator>();
 if (orleansOptions.Enabled)
 {
+    builder.Services.AddSingleton<IProjectGrainFactory, OrleansProjectGrainFactory>();
+    builder.Services.AddSingleton<IProjectRegistryGrainFactory, OrleansProjectRegistryGrainFactory>();
+    builder.Services.AddSingleton<IProjectCatalog>(serviceProvider =>
+        new GrainBackedProjectCatalog(
+            serviceProvider.GetRequiredService<IProjectGrainFactory>(),
+            serviceProvider.GetRequiredService<IProjectRegistryGrainFactory>(),
+            serviceProvider.GetRequiredService<InMemoryProjectCatalog>()));
     builder.Services.AddSingleton<ISessionGrainFactory, OrleansSessionGrainFactory>();
     builder.Services.AddSingleton<ISessionOrchestrator, GrainBackedSessionOrchestrator>();
 }
 else
 {
+    builder.Services.AddSingleton<IProjectCatalog>(serviceProvider => serviceProvider.GetRequiredService<InMemoryProjectCatalog>());
     builder.Services.AddSingleton<ISessionOrchestrator, InMemorySessionOrchestrator>();
 }
 builder.Services.AddSingleton<BrokerControlMessageHandler>();
@@ -139,6 +147,7 @@ app.MapGet("/", (OrleansHostStatusSnapshot status) => Results.Ok(new
     {
         hostMode = status.HostMode,
         sessionStateMode = status.SessionStateMode,
+        projectStateMode = status.ProjectStateMode,
         summary = status.Summary
     }
 }));

@@ -1246,3 +1246,31 @@ Issue #19 promotes broker session state from the Phase 1 in-memory registry into
 - `dotnet test .\SquadScout.slnx -nologo --no-build` ✅
 - `dotnet run --project .\src\SquadScout.Broker\SquadScout.Broker.csproj --no-build --no-launch-profile` with `Orleans__Enabled=true` and SQLite smoke settings ✅
 - `GET http://127.0.0.1:5075/api/orleans/status` returned `hostMode=session-grains`, `sessionStateMode=durable-grain`, and `schemaReady=true` ✅
+
+## Link — Issue #20 Project Grain & State Migration Path (2026-03-26)
+
+### Decision
+
+Issue #20 promotes the broker project catalog from the Phase 1 in-memory registry into a **durable Orleans project grain path**:
+- keep one durable project grain per `projectId` for registration lookup
+- add a persisted project registry grain for list/query operations and Phase 1 seed-import tracking
+- keep session grains attached by `projectId` only; PTY ownership and live transport lifecycle stay outside grains in the broker relay/runtime path
+
+### Rationale
+
+- Project registration is the remaining Phase 1 metadata seam after #19. Persisting it closes the loop so both project and session metadata survive broker restarts without inventing a second persistence model.
+- Sessions already persist their `ProjectId` in `ISessionGrain`; reusing that attachment avoids duplicating transport/runtime ownership inside project grains while still binding sessions to durable project state.
+- A safe cutover needs an explicit bridge: if the current broker process already seeded the old in-memory catalog, the Orleans-backed catalog imports those registrations on first durable access so local admin/testing flows do not lose project metadata mid-process.
+
+### Implementation Notes
+
+- `src\SquadScout.Broker\Orleans\ProjectGrainModels.cs` defines durable registration DTOs plus the persisted project registry snapshot used for list/query and Phase 1 seed-import metadata.
+- `src\SquadScout.Broker\Orleans\ProjectGrain.cs` and `ProjectRegistryGrain.cs` mirror the session-grain load/persist pattern so direct project lookup and catalog listing share the same Orleans storage model.
+- `src\SquadScout.Broker\Projects\GrainBackedProjectCatalog.cs` preserves the existing `IProjectCatalog` seam, imports any already-seeded Phase 1 projects once, and mirrors subsequent writes into durable grains without changing relay/PTTY ownership.
+- `src\SquadScout.Broker\Program.cs` now switches Orleans-enabled brokers onto the grain-backed project catalog and advertises `hostMode=session-project-grains` plus `projectStateMode=durable-grain` through `/api/orleans/status`.
+- Compatibility note: durable metadata does **not** revive active PTY sessions. Operators should drain or restart running sessions before toggling Orleans mode across a cutover.
+
+### Validation
+
+- `dotnet build .\SquadScout.slnx -nologo` ✅
+- `dotnet test .\SquadScout.slnx -nologo --no-build` ✅
