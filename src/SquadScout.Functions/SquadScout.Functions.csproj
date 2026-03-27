@@ -1,10 +1,11 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <AzureFunctionsVersion>v4</AzureFunctionsVersion>
     <OutputType>Exe</OutputType>
     <RootNamespace>SquadScout.Functions</RootNamespace>
     <TargetFramework>net8.0</TargetFramework>
+    <UserSecretsId>ab2dee68-7f48-4e43-a538-94aa56a42995</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
