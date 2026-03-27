@@ -25,14 +25,26 @@ param runtime string = 'dotnet-isolated'
 @description('Function App runtime version')
 param runtimeVersion string = '8.0'
 
-@description('App Service Plan SKU')
+@description('Flex Consumption plan SKU')
 @allowed([
-  'Y1'     // Consumption
-  'EP1'    // Elastic Premium
-  'EP2'
-  'EP3'
+  'FC1'
 ])
-param appServicePlanSku string = 'Y1'
+param appServicePlanSku string = 'FC1'
+
+@description('Maximum scale-out instance count for the Function App')
+@minValue(40)
+@maxValue(1000)
+param maximumInstanceCount int = 100
+
+@description('Instance memory size in MB for the Function App')
+@allowed([
+  2048
+  4096
+])
+param instanceMemoryMB int = 2048
+
+var deploymentContainerName = 'deployments'
+var storageBlobDataContributorRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
 
 resource functionStorage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
   name: functionStorageName
@@ -49,23 +61,39 @@ resource functionStorage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
   }
 }
 
-resource appServicePlan 'Microsoft.Web/serverfarms@2023-01-01' = {
+resource functionStorageBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+  parent: functionStorage
+  name: 'default'
+}
+
+resource deploymentContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: functionStorageBlobService
+  name: deploymentContainerName
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
+resource appServicePlan 'Microsoft.Web/serverfarms@2024-04-01' = {
   name: appServicePlanName
   location: location
   tags: tags
   sku: {
     name: appServicePlanSku
+    tier: 'FlexConsumption'
   }
   properties: {
-    reserved: true  // Required for Linux
+    reserved: true
   }
   kind: 'functionapp'
 }
 
-resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
+resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
   name: functionAppName
   location: location
-  tags: tags
+  tags: union(tags, {
+    'azd-service-name': 'functions'
+  })
   kind: 'functionapp,linux'
   identity: {
     type: 'SystemAssigned'
@@ -74,62 +102,57 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
     serverFarmId: appServicePlan.id
     httpsOnly: true
     siteConfig: {
-      linuxFxVersion: '${toUpper(runtime)}|${runtimeVersion}'
       ftpsState: 'Disabled'
       minTlsVersion: '1.2'
-      use32BitWorkerProcess: false
       cors: {
         allowedOrigins: [
           '*'
         ]
       }
-      appSettings: [
-        {
-          name: 'AzureWebJobsStorage'
-          value: 'DefaultEndpointsProtocol=https;AccountName=${functionStorage.name};AccountKey=${functionStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
-        }
-        {
-          name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING'
-          value: 'DefaultEndpointsProtocol=https;AccountName=${functionStorage.name};AccountKey=${functionStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
-        }
-        {
-          name: 'WEBSITE_CONTENTSHARE'
-          value: toLower(functionAppName)
-        }
-        {
-          name: 'FUNCTIONS_EXTENSION_VERSION'
-          value: '~4'
-        }
-        {
-          name: 'FUNCTIONS_WORKER_RUNTIME'
-          value: runtime
-        }
-        {
-          name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
-          value: applicationInsightsConnectionString
-        }
-        {
-          name: 'Functions__WebPubSubEndpoint'
-          value: webPubSubEndpoint
-        }
-        {
-          name: 'Functions__WebPubSubHub'
-          value: webPubSubHub
-        }
-        {
-          name: 'Functions__BrokerBaseUrl'
-          value: 'http://127.0.0.1:5071'
-        }
-        {
-          name: 'Functions__TokenLifetimeMinutes'
-          value: '60'
-        }
-        {
-          name: 'Functions__EnableLocalDevelopmentIdentity'
-          value: 'false'
-        }
-      ]
     }
+    functionAppConfig: {
+      deployment: {
+        storage: {
+          type: 'blobContainer'
+          value: '${functionStorage.properties.primaryEndpoints.blob}${deploymentContainerName}'
+          authentication: {
+            type: 'SystemAssignedIdentity'
+          }
+        }
+      }
+      scaleAndConcurrency: {
+        maximumInstanceCount: maximumInstanceCount
+        instanceMemoryMB: instanceMemoryMB
+      }
+      runtime: {
+        name: runtime
+        version: runtimeVersion
+      }
+    }
+  }
+}
+
+resource functionAppSettings 'Microsoft.Web/sites/config@2024-04-01' = {
+  parent: functionApp
+  name: 'appsettings'
+  properties: {
+    AzureWebJobsStorage: 'DefaultEndpointsProtocol=https;AccountName=${functionStorage.name};AccountKey=${functionStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+    APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsightsConnectionString
+    Functions__WebPubSubEndpoint: webPubSubEndpoint
+    Functions__WebPubSubHub: webPubSubHub
+    Functions__BrokerBaseUrl: 'http://127.0.0.1:5071'
+    Functions__TokenLifetimeMinutes: '60'
+    Functions__EnableLocalDevelopmentIdentity: 'false'
+  }
+}
+
+resource deploymentContainerBlobDataContributorAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(functionStorage.id, functionApp.id, storageBlobDataContributorRoleDefinitionId)
+  scope: functionStorage
+  properties: {
+    roleDefinitionId: storageBlobDataContributorRoleDefinitionId
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 

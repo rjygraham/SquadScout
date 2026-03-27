@@ -11,7 +11,7 @@ The following resources are deployed:
 - **Application Insights** - Telemetry and observability
 - **Log Analytics Workspace** - Log aggregation backend
 - **Storage Account** - Functions runtime storage
-- **App Service Plan** - Functions compute (Consumption tier)
+- **App Service Plan** - Functions compute (Flex Consumption tier)
 
 The Function App uses a **system-assigned managed identity** with Web PubSub Service Owner role to mint client access tokens without connection strings.
 
@@ -66,7 +66,7 @@ az deployment sub create \
 Required parameters in `main.bicep`:
 
 | Parameter | Description | Default | Example |
-|-----------|-------------|---------|---------|
+| --------- | ----------- | ------- | ------- |
 | `environmentName` | Environment name (used for resource naming) | (required) | `dev`, `staging`, `prod` |
 | `location` | Azure region for all resources | (required) | `eastus`, `westus2` |
 
@@ -75,7 +75,7 @@ Required parameters in `main.bicep`:
 After deployment, these outputs are available for configuring the Functions app and MAUI client:
 
 | Output | Description | Use in |
-|--------|-------------|--------|
+| ------ | ----------- | ------ |
 | `WEBPUBSUB_ENDPOINT` | Web PubSub service HTTPS endpoint | Functions `Functions__WebPubSubEndpoint` |
 | `WEBPUBSUB_HUB_NAME` | Web PubSub hub name | Functions `Functions__WebPubSubHub` |
 | `FUNCTIONS_APP_URL` | Function App HTTPS endpoint | MAUI app negotiate client |
@@ -121,14 +121,15 @@ az webpubsub hub update \
 Phase 1 uses Azure's free/consumption tiers where available:
 
 - **Web PubSub**: Free tier (20 concurrent connections, 20K messages/day)
-- **Functions**: Consumption plan (pay per execution)
+- **Functions**: Flex Consumption plan (pay per execution with configurable scale)
 - **Application Insights**: Pay-as-you-go (first 5 GB/month free)
 - **Log Analytics**: Pay-as-you-go (first 5 GB/month free)
 - **Storage**: Standard LRS (minimal Functions storage only)
 
 For production deployments, consider:
+
 - Upgrading Web PubSub to Standard tier for higher concurrency
-- Using Functions Premium (EP1) for VNet integration or faster cold starts
+- Tuning Flex Consumption instance memory and max scale in `core/host/functions.bicep`
 - Configuring Log Analytics retention policies
 
 ## Security
@@ -144,7 +145,13 @@ For production deployments, consider:
 To modify resources, edit the relevant module:
 
 - `core/messaging/webpubsub.bicep` - Web PubSub service configuration
-- `core/host/functions.bicep` - Function App and hosting plan
+- `core/host/functions.bicep` - Function App and Flex Consumption hosting plan
+
+## Flex Consumption Notes
+
+- The Functions host is deployed on the Linux-only Flex Consumption plan (`FC1`).
+- Flex Consumption uses `functionAppConfig` with a blob deployment container instead of the legacy content share settings used by classic Consumption.
+- If you previously deployed this environment with a `Y1` Consumption plan, run `azd down --purge` before reprovisioning to avoid drift between the old and new hosting models.
 - `core/monitor/monitoring.bicep` - Application Insights and Log Analytics
 - `core/security/role.bicep` - RBAC role assignments
 

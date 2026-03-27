@@ -9,6 +9,10 @@ param environmentName string
 @description('Primary location for all resources')
 param location string
 
+@maxLength(90)
+@description('Optional name for the resource group. If not provided, a name will be generated based on the environment name.')
+param resourceGroupName string = ''
+
 // Tags applied to all resources
 var tags = {
   'azd-env-name': environmentName
@@ -19,7 +23,7 @@ var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 
 resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
-  name: '${abbrs.resourcesResourceGroups}${environmentName}'
+  name: empty(resourceGroupName) ? '${abbrs.resourcesResourceGroups}${environmentName}' : resourceGroupName
   location: location
   tags: tags
 }
